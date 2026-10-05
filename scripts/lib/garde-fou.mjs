@@ -1,11 +1,10 @@
-// Garde-fou de ProjectMind : retrouve les ADR qui protègent un fichier et rédige
-// la demande de confirmation renvoyée par le hook PreToolUse.
+// Garde-fou de ProjectMind : retrouve les ADR qui protègent un fichier et rédige le message
+// à montrer avant de le modifier. Ne connaît aucun outil d'IA (ADR-004) : chaque adaptateur
+// de scripts/lib/adaptateurs/ traduit l'appel de son outil, puis la réponse.
 
 import path from 'node:path';
 import { DOSSIER_DECISIONS, lireDecisions, normaliserChemin } from './adr.mjs';
 
-// Outil de modification → champ de tool_input qui porte le chemin du fichier.
-const OUTILS = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' };
 // Un ADR protège tant qu'il n'est pas explicitement inactif : mieux vaut protéger en trop.
 const STATUTS_INACTIFS = ['remplacee', 'abandonnee', 'rejetee'];
 // Un ADR est lui-même protégé : changer son statut ou ses fichiers retirerait la protection sans rien demander.
@@ -39,10 +38,9 @@ export function cheminRelatif(racine, fichier) {
 
 export const estActif = (adr) => !STATUTS_INACTIFS.some((s) => simplifier(adr.statut ?? '').startsWith(s));
 
-// Rend la sortie JSON du hook, ou null si l'outil peut suivre son cours.
-export function decider(entree, racine) {
-  const champ = OUTILS[entree?.tool_name];
-  const fichier = champ && entree.tool_input?.[champ];
+// Ce que le projet protège dans ce fichier, ou null s'il est libre ou hors du projet.
+// Rend { fichier (relatif), estUnAdr, touchees: [{ adr, motifs }], message }.
+export function protections(racine, fichier) {
   if (typeof fichier !== 'string' || !fichier) return null;
   const rel = cheminRelatif(racine, fichier);
   if (!rel) return null;
@@ -52,13 +50,7 @@ export function decider(entree, racine) {
     .map((adr) => ({ adr, motifs: adr.fichiers_proteges.filter((m) => correspond(m, rel)) }))
     .filter((t) => t.motifs.length);
   if (!estUnAdr && !touchees.length) return null;
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'ask',
-      permissionDecisionReason: rediger(rel, estUnAdr, touchees),
-    },
-  };
+  return { fichier: rel, estUnAdr, touchees, message: rediger(rel, estUnAdr, touchees) };
 }
 
 function rediger(rel, estUnAdr, touchees) {

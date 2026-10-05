@@ -10,7 +10,9 @@ import { spawnSync } from 'node:child_process';
 import { ErreurAdr, lireDecisions, numeroDe } from './adr.mjs';
 import { MOTIF_ADR, correspond, estActif } from './garde-fou.mjs';
 
-export const CONFIG = '.claude/projectmind.json';
+// Réglage versionné avec le projet. L'ancien emplacement reste lu pour les projets réglés avant la v2 (ADR-004).
+export const CONFIG = '.projectmind.json';
+export const CONFIG_ANCIENNE = '.claude/projectmind.json';
 const CLES_CONFIG = ['controle', 'base'];
 export const OK = '✓';
 export const ATTENTION = '⚠';
@@ -43,24 +45,30 @@ function baseParDefaut(racine) {
   return [r.status === 0 ? r.stdout.trim() : null, 'main', 'master'].filter(Boolean).find((ref) => existe(racine, ref)) ?? null;
 }
 
+// Rend { config, erreurs, fichier } ; fichier vaut null si le projet n'a aucun réglage.
 export function lireConfig(racine) {
-  const chemin = path.join(racine, CONFIG);
-  if (!fs.existsSync(chemin)) return { config: {}, erreurs: [] };
+  const presents = [CONFIG, CONFIG_ANCIENNE].filter((f) => fs.existsSync(path.join(racine, f)));
+  if (!presents.length) return { config: {}, erreurs: [], fichier: null };
+  const [fichier] = presents;
+  const chemin = path.join(racine, fichier);
+  const erreurs = presents.length > 1 ? [`${CONFIG_ANCIENNE} ignoré : ${CONFIG} est prioritaire`] : [];
   let config;
   try {
     config = JSON.parse(fs.readFileSync(chemin, 'utf8').replace(/^﻿/, ''));
   } catch (e) {
-    return { config: {}, erreurs: [`${CONFIG} illisible : ${e.message}`] };
+    return { config: {}, erreurs: [...erreurs, `${fichier} illisible : ${e.message}`], fichier };
   }
-  if (!config || typeof config !== 'object' || Array.isArray(config)) return { config: {}, erreurs: [`${CONFIG} doit contenir un objet JSON`] };
-  const erreurs = Object.keys(config).filter((k) => !CLES_CONFIG.includes(k)).map((k) => `${CONFIG} : clé inconnue « ${k} »`);
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return { config: {}, erreurs: [...erreurs, `${fichier} doit contenir un objet JSON`], fichier };
+  }
+  erreurs.push(...Object.keys(config).filter((k) => !CLES_CONFIG.includes(k)).map((k) => `${fichier} : clé inconnue « ${k} »`));
   for (const k of CLES_CONFIG) {
     if (config[k] !== undefined && typeof config[k] !== 'string') {
-      erreurs.push(`${CONFIG} : « ${k} » doit être un texte`);
+      erreurs.push(`${fichier} : « ${k} » doit être un texte`);
       delete config[k];
     }
   }
-  return { config, erreurs };
+  return { config, erreurs, fichier };
 }
 
 // Fichiers changés entre la base commune et HEAD : [{ statut: A|M|D|T, fichier }].
@@ -87,6 +95,7 @@ function sectionControle(racine, controle, sansControle) {
   return {
     titre,
     etat,
+    journal,
     lignes: [`${controle} → code ${r.status ?? r.signal}, ${duree} s`, `journal complet : ${journal}`, ...fin.map((l) => `│ ${l}`)],
   };
 }
@@ -215,12 +224,13 @@ export function controler(racine, { base, controle, sansControle = false, gitlea
   const suivis = git(racine, ['ls-files', '-z']).split('\0').filter(Boolean);
   // L'état de l'arbre est relevé avant la commande de contrôle, qui peut créer des fichiers.
   const arbre = sectionArbre(racine);
+  // L'id reste stable quand les titres changent de langue : c'est lui que lisent les tests et la sortie JSON.
   const sections = [
-    ...(erreurs.length ? [{ titre: 'Configuration', etat: ATTENTION, lignes: erreurs }] : []),
-    sectionControle(racine, controle ?? config.controle, sansControle),
-    sectionAdr(racine, changements, suivis),
-    sectionSecrets(racine, commune, changements, gitleaks),
-    arbre,
+    ...(erreurs.length ? [{ id: 'configuration', titre: 'Configuration', etat: ATTENTION, lignes: erreurs }] : []),
+    { id: 'controle', ...sectionControle(racine, controle ?? config.controle, sansControle) },
+    { id: 'adr', ...sectionAdr(racine, changements, suivis) },
+    { id: 'secrets', ...sectionSecrets(racine, commune, changements, gitleaks) },
+    { id: 'arbre', ...arbre },
   ];
   const etats = sections.map((s) => s.etat);
   return {

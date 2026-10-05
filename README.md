@@ -58,7 +58,8 @@ Après une modification du plugin : `/reload-plugins`.
 
 ## Réglage du projet
 
-`.claude/projectmind.json`, versionné avec le projet :
+`.projectmind.json` à la racine, versionné avec le projet. `.claude/projectmind.json` reste lu
+s'il est seul ; si les deux existent, `.projectmind.json` passe avant et le rapport le signale.
 
 ```json
 { "controle": "PYTHONUTF8=1 ./outillage/verifier.sh tests", "base": "main" }

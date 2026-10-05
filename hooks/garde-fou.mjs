@@ -4,7 +4,7 @@
 // En cas d'erreur, le code 1 laisse l'outil suivre son cours : le garde-fou ne bloque jamais le travail.
 
 import fs from 'node:fs';
-import { decider } from '../scripts/lib/garde-fou.mjs';
+import { decider } from '../scripts/lib/adaptateurs/claude-code.mjs';
 
 try {
   const entree = JSON.parse(fs.readFileSync(0, 'utf8').replace(/^﻿/, ''));

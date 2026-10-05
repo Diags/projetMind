@@ -22,7 +22,7 @@ const ecrire = (racine, rel, contenu) => {
   fs.writeFileSync(path.join(racine, rel), contenu);
 };
 const git = (racine, ...args) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@exemple.fr', '-c', 'core.autocrlf=false', ...args], { cwd: racine, stdio: 'pipe' });
-const section = (rapport, debut) => rapport.sections.find((s) => s.titre.startsWith(debut));
+const section = (rapport, id) => rapport.sections.find((s) => s.id === id);
 
 // main : src/a.js protégé par ADR-001. La branche le touche, modifie ADR-001, ajoute ADR-002,
 // un fichier avec une fausse clé AWS en ligne 2 et un .env.
@@ -63,14 +63,13 @@ test('rapport complet : ADR touchés, secrets masqués, commande en échec → �
   assert.equal(r.base, 'main');
   assert.equal(r.commits, 1);
 
-  const controle = section(r, 'Commande');
+  const controle = section(r, 'controle');
   assert.equal(controle.etat, ECHEC);
   assert.match(controle.lignes[0], /^echo casse; exit 3 → code 3, \d+ s$/);
-  const journal = controle.lignes[1].replace('journal complet : ', '');
-  assert.equal(fs.readFileSync(journal, 'utf8').trim(), 'casse');
-  fs.rmSync(journal);
+  assert.equal(fs.readFileSync(controle.journal, 'utf8').trim(), 'casse');
+  fs.rmSync(controle.journal);
 
-  const adr = section(r, 'Décisions');
+  const adr = section(r, 'adr');
   assert.equal(adr.etat, ATTENTION);
   assert.deepEqual(adr.lignes, [
     'ADR modifié sur la branche : docs/decisions/ADR-001-a-est-fige.md — à relire en PR',
@@ -79,7 +78,7 @@ test('rapport complet : ADR touchés, secrets masqués, commande en échec → �
     'ADR-001 : le motif « ancien/** » ne désigne aucun fichier suivi',
   ]);
 
-  const secrets = section(r, 'Secrets');
+  const secrets = section(r, 'secrets');
   assert.equal(secrets.etat, ECHEC);
   assert.deepEqual(secrets.lignes.slice(1), [
     '.env — fichier sensible versionné par la branche',
@@ -95,7 +94,7 @@ test('rapport complet : ADR touchés, secrets masqués, commande en échec → �
 
 test('gitleaks, quand il est installé : trouve la clé et masque sa valeur', { skip: !GITLEAKS && 'gitleaks absent' }, () => {
   const racine = depot();
-  const secrets = section(controler(racine, { sansControle: true }), 'Secrets');
+  const secrets = section(controler(racine, { sansControle: true }), 'secrets');
   assert.equal(secrets.etat, ECHEC);
   assert.match(secrets.lignes[0], /gitleaks \d/);
   assert.ok(secrets.lignes.some((l) => /^src\/config\.js:2 — \S+ \(commit [0-9a-f]{7}\)$/.test(l)), secrets.lignes.join('\n'));
@@ -105,37 +104,55 @@ test('gitleaks, quand il est installé : trouve la clé et masque sa valeur', { 
 test('branche propre et commande verte → ✓ Prêt', () => {
   const racine = depot({ propre: true });
   const r = controler(racine, { controle: 'echo ok', gitleaks: false });
-  assert.deepEqual(r.sections.map((s) => [s.titre, s.etat]), [
-    ['Commande de contrôle', OK],
-    ['Décisions (ADR)', OK],
-    ['Secrets (ce que la branche ajoute)', OK],
-    ['Modifications non commitées', OK],
+  assert.deepEqual(r.sections.map((s) => [s.id, s.etat]), [
+    ['controle', OK],
+    ['adr', OK],
+    ['secrets', OK],
+    ['arbre', OK],
   ]);
-  assert.deepEqual(section(r, 'Décisions').lignes, ['1 ADR lus : aucun fichier protégé touché, aucune anomalie']);
+  assert.deepEqual(section(r, 'adr').lignes, ['1 ADR lus : aucun fichier protégé touché, aucune anomalie']);
   assert.match(formater(r), /Verdict : ✓ Prêt\n$/);
-  fs.rmSync(section(r, 'Commande').lignes[1].replace('journal complet : ', ''));
+  fs.rmSync(section(r, 'controle').journal);
 });
 
 test('sans commande déclarée, ou avec des fichiers non commités → ⚠', () => {
   const racine = depot({ propre: true });
   ecrire(racine, 'brouillon.txt', 'x');
   const r = controler(racine, { gitleaks: false });
-  assert.equal(section(r, 'Commande').etat, ATTENTION);
-  assert.match(section(r, 'Commande').lignes[0], /aucune commande déclarée/);
-  assert.equal(section(r, 'Modifications').etat, ATTENTION);
+  assert.equal(section(r, 'controle').etat, ATTENTION);
+  assert.match(section(r, 'controle').lignes[0], /aucune commande déclarée/);
+  assert.equal(section(r, 'controle').journal, undefined);
+  assert.equal(section(r, 'arbre').etat, ATTENTION);
   assert.equal(r.verdict, ATTENTION);
 });
 
-test('la commande et la base viennent de .claude/projectmind.json', () => {
+test('la commande et la base viennent de .projectmind.json', () => {
   const racine = depot({ propre: true });
-  ecrire(racine, '.claude/projectmind.json', JSON.stringify({ controle: 'echo depuis la config', base: 'main', inconnue: 1 }));
+  ecrire(racine, '.projectmind.json', JSON.stringify({ controle: 'echo depuis la config', base: 'main', inconnue: 1 }));
   git(racine, 'add', '.');
   git(racine, 'commit', '-q', '-m', 'config');
-  assert.deepEqual(lireConfig(racine).erreurs, ['.claude/projectmind.json : clé inconnue « inconnue »']);
+  assert.deepEqual(lireConfig(racine), {
+    config: { controle: 'echo depuis la config', base: 'main', inconnue: 1 },
+    erreurs: ['.projectmind.json : clé inconnue « inconnue »'],
+    fichier: '.projectmind.json',
+  });
   const r = controler(racine, { gitleaks: false });
-  assert.equal(section(r, 'Configuration').etat, ATTENTION);
-  assert.match(section(r, 'Commande').lignes[0], /^echo depuis la config → code 0/);
-  fs.rmSync(section(r, 'Commande').lignes[1].replace('journal complet : ', ''));
+  assert.equal(section(r, 'configuration').etat, ATTENTION);
+  assert.match(section(r, 'controle').lignes[0], /^echo depuis la config → code 0/);
+  fs.rmSync(section(r, 'controle').journal);
+});
+
+test('.claude/projectmind.json reste lu, mais .projectmind.json passe avant', () => {
+  const racine = depot({ propre: true });
+  assert.deepEqual(lireConfig(racine), { config: {}, erreurs: [], fichier: null });
+  ecrire(racine, '.claude/projectmind.json', JSON.stringify({ controle: 'echo ancien' }));
+  assert.deepEqual(lireConfig(racine), { config: { controle: 'echo ancien' }, erreurs: [], fichier: '.claude/projectmind.json' });
+  ecrire(racine, '.projectmind.json', JSON.stringify({ controle: 'echo nouveau' }));
+  const { config, erreurs, fichier } = lireConfig(racine);
+  assert.deepEqual(config, { controle: 'echo nouveau' });
+  assert.equal(fichier, '.projectmind.json');
+  assert.equal(erreurs.length, 1, 'l\'ancien fichier ignoré est signalé');
+  assert.match(erreurs[0], /^\.claude\/projectmind\.json /);
 });
 
 test('CLI : code 1 si non prêt, 0 si prêt, 2 si la base est introuvable', () => {

@@ -6,7 +6,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { creer } from '../scripts/lib/adr.mjs';
-import { correspond, cheminRelatif, decider } from '../scripts/lib/garde-fou.mjs';
+import { correspond, cheminRelatif, protections } from '../scripts/lib/garde-fou.mjs';
+import { decider } from '../scripts/lib/adaptateurs/claude-code.mjs';
 
 const HOOK = fileURLToPath(new URL('../hooks/garde-fou.mjs', import.meta.url));
 const temporaires = [];
@@ -27,12 +28,8 @@ function projet() {
   return racine;
 }
 
-const appel = (racine, tool_name, relatif, champ = 'file_path') => ({
-  hook_event_name: 'PreToolUse',
-  tool_name,
-  tool_input: { [champ]: path.join(racine, relatif) },
-  cwd: racine,
-});
+// [id, motifs] de chaque ADR qui protège le fichier : ce qui ne dépend pas de la langue des messages.
+const touchees = (p) => p.touchees.map((t) => [t.adr.id, t.motifs]);
 
 test('correspond : jokers, dossiers, casse', () => {
   const cas = [
@@ -63,61 +60,101 @@ test('cheminRelatif : dans le projet ou hors du projet', () => {
   assert.equal(cheminRelatif(racine, racine), null);
 });
 
-test('decider : fichier protégé → demande de confirmation citant l\'ADR', () => {
+test('protections : les ADR actifs qui protègent le fichier, avec leurs motifs', () => {
   const racine = projet();
-  const sortie = decider(appel(racine, 'Edit', 'src/a.js'), racine);
-  assert.equal(sortie.hookSpecificOutput.hookEventName, 'PreToolUse');
-  assert.equal(sortie.hookSpecificOutput.permissionDecision, 'ask');
-  const raison = sortie.hookSpecificOutput.permissionDecisionReason;
-  assert.match(raison, /^ProjectMind : src\/a\.js est protégé par une décision\./);
-  assert.match(raison, /ADR-001 — Runtime figé \[motif : src\/a\.js\]/);
-  assert.match(raison, /Raison : Raison de test\./);
-  assert.match(raison, /Alternatives rejetées : Tout réécrire : trop risqué/);
-  assert.match(raison, /Source : docs\/decisions\/ADR-001-runtime-fige\.md/);
-  assert.doesNotMatch(raison, /ADR-003/, 'un ADR remplacé ne protège plus');
+  const p = protections(racine, path.join(racine, 'src', 'a.js'));
+  assert.equal(p.fichier, 'src/a.js');
+  assert.equal(p.estUnAdr, false);
+  assert.deepEqual(touchees(p), [['ADR-001', ['src/a.js']]], 'ADR-003 est remplacé : il ne protège plus');
+  assert.deepEqual(touchees(protections(racine, 'src/a.js')), [['ADR-001', ['src/a.js']]], 'chemin relatif à la racine');
+  assert.deepEqual(touchees(protections(racine, path.join(racine, 'runtime', 'x', 'y.py'))), [['ADR-001', ['runtime/**']]]);
+  assert.deepEqual(touchees(protections(racine, path.join(racine, 'db', 'm', '001.sql'))), [['ADR-002', ['**/*.sql']]]);
 });
 
-test('decider : chaque outil de modification est surveillé', () => {
+test('protections : un fichier protégé par plusieurs ADR les cite tous', () => {
   const racine = projet();
-  assert.match(decider(appel(racine, 'Write', 'runtime/x/y.py'), racine).hookSpecificOutput.permissionDecisionReason, /ADR-001/);
-  assert.match(decider(appel(racine, 'MultiEdit', 'db/m/001.sql'), racine).hookSpecificOutput.permissionDecisionReason, /ADR-002 — Migrations SQL/);
-  assert.match(decider(appel(racine, 'NotebookEdit', 'runtime/n.ipynb', 'notebook_path'), racine).hookSpecificOutput.permissionDecisionReason, /ADR-001/);
+  creer(racine, { ...ADR, titre: 'Pas de SQL dans runtime', fichiers_proteges: ['runtime/**/*.sql'] });
+  assert.deepEqual(touchees(protections(racine, path.join(racine, 'runtime', 'a.sql'))), [
+    ['ADR-001', ['runtime/**']],
+    ['ADR-002', ['**/*.sql']],
+    ['ADR-004', ['runtime/**/*.sql']],
+  ]);
 });
 
-test('decider : rien à dire hors protection', () => {
+test('protections : un ADR est protégé, même sans motif qui le vise', () => {
+  const racine = projet();
+  const p = protections(racine, path.join(racine, 'docs', 'decisions', 'ADR-001-runtime-fige.md'));
+  assert.equal(p.estUnAdr, true);
+  assert.deepEqual(p.touchees, []);
+  assert.equal(protections(racine, path.join(racine, 'docs', 'decisions', 'ADR-009-nouveau.md')).estUnAdr, true);
+  assert.equal(protections(racine, path.join(racine, 'docs', 'decisions', 'notes.md')), null);
+  assert.equal(protections(racine, path.join(racine, 'docs', 'ADR-001-ailleurs.md')), null);
+});
+
+test('protections : rien à dire hors protection', () => {
+  const racine = projet();
+  assert.equal(protections(racine, path.join(racine, 'src', 'b.js')), null);
+  assert.equal(protections(racine, path.join(racine, '..', 'ailleurs', 'src', 'a.js')), null);
+  assert.equal(protections(racine, ''), null);
+  assert.equal(protections(racine, undefined), null);
+  const vide = fs.mkdtempSync(path.join(os.tmpdir(), 'projectmind-'));
+  temporaires.push(vide);
+  assert.equal(protections(vide, path.join(vide, 'src', 'a.js')), null);
+});
+
+// Le seul test qui lit le texte du message : il change avec la langue.
+test('message : cite l\'ADR, son motif, sa raison, ses alternatives et sa source', () => {
+  const racine = projet();
+  const { message } = protections(racine, path.join(racine, 'src', 'a.js'));
+  assert.match(message, /^ProjectMind : src\/a\.js est protégé par une décision\./);
+  assert.match(message, /ADR-001 — Runtime figé \[motif : src\/a\.js\]/);
+  assert.match(message, /Raison : Raison de test\./);
+  assert.match(message, /Alternatives rejetées : Tout réécrire : trop risqué/);
+  assert.match(message, /Source : docs\/decisions\/ADR-001-runtime-fige\.md/);
+  assert.equal(message.split('\n\n').length, 3, 'en-tête, un bloc par ADR, consigne finale');
+  const adr = protections(racine, path.join(racine, 'docs', 'decisions', 'ADR-001-runtime-fige.md')).message;
+  assert.equal(adr.split('\n\n').length, 2, 'en-tête et avertissement ADR, sans consigne de mise à jour');
+});
+
+const appel = (racine, tool_name, relatif, champ = 'file_path') => ({
+  hook_event_name: 'PreToolUse',
+  tool_name,
+  tool_input: { [champ]: path.join(racine, relatif) },
+  cwd: racine,
+});
+
+test('Claude Code : chaque outil de modification reçoit une demande de confirmation', () => {
+  const racine = projet();
+  for (const [outil, relatif, champ] of [
+    ['Edit', 'src/a.js'],
+    ['Write', 'runtime/x/y.py'],
+    ['MultiEdit', 'db/m/001.sql'],
+    ['NotebookEdit', 'runtime/n.ipynb', 'notebook_path'],
+    ['Edit', 'docs/decisions/ADR-001-runtime-fige.md'],
+  ]) {
+    const sortie = decider(appel(racine, outil, relatif, champ), racine);
+    assert.deepEqual(sortie, {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'ask',
+        permissionDecisionReason: protections(racine, path.join(racine, relatif)).message,
+      },
+    }, `${outil} ${relatif}`);
+  }
+});
+
+test('Claude Code : rien à dire hors protection ou hors outil de modification', () => {
   const racine = projet();
   assert.equal(decider(appel(racine, 'Edit', 'src/b.js'), racine), null);
   assert.equal(decider(appel(racine, 'Read', 'src/a.js'), racine), null);
+  assert.equal(decider(appel(racine, 'NotebookEdit', 'src/a.js'), racine), null, 'NotebookEdit lit notebook_path');
   assert.equal(decider({ tool_name: 'Bash', tool_input: { command: 'rm src/a.js' } }, racine), null);
-  assert.equal(decider(appel(racine, 'Edit', '../ailleurs/src/a.js'), racine), null);
   assert.equal(decider({ tool_name: 'Edit', tool_input: {} }, racine), null);
-  const vide = fs.mkdtempSync(path.join(os.tmpdir(), 'projectmind-'));
-  temporaires.push(vide);
-  assert.equal(decider(appel(vide, 'Edit', 'src/a.js'), vide), null);
+  assert.equal(decider({ tool_name: 'Edit' }, racine), null);
+  assert.equal(decider(null, racine), null);
 });
 
-test('decider : un fichier protégé par plusieurs ADR les cite tous', () => {
-  const racine = projet();
-  creer(racine, { ...ADR, titre: 'Pas de SQL dans runtime', fichiers_proteges: ['runtime/**/*.sql'] });
-  const raison = decider(appel(racine, 'Edit', 'runtime/a.sql'), racine).hookSpecificOutput.permissionDecisionReason;
-  assert.match(raison, /ADR-001/);
-  assert.match(raison, /ADR-002/);
-  assert.match(raison, /ADR-004/);
-});
-
-test('decider : modifier ou créer un ADR à la main demande confirmation', () => {
-  const racine = projet();
-  const modifier = decider(appel(racine, 'Edit', 'docs/decisions/ADR-001-runtime-fige.md'), racine);
-  assert.equal(modifier.hookSpecificOutput.permissionDecision, 'ask');
-  const raison = modifier.hookSpecificOutput.permissionDecisionReason;
-  assert.match(raison, /Ce fichier est un ADR/);
-  assert.doesNotMatch(raison, /mets alors l'ADR à jour/, 'aucun ADR ne protège ce fichier par motif');
-  assert.match(decider(appel(racine, 'Write', 'docs/decisions/ADR-009-nouveau.md'), racine).hookSpecificOutput.permissionDecisionReason, /est un ADR/);
-  assert.equal(decider(appel(racine, 'Write', 'docs/decisions/notes.md'), racine), null);
-  assert.equal(decider(appel(racine, 'Write', 'docs/ADR-001-ailleurs.md'), racine), null);
-});
-
-// Le faux appel du critère du lot 3 : le script du hook, tel que Claude Code le lance.
+// Le faux appel : le script du hook, tel que Claude Code le lance.
 const lancerHook = (racine, entree) => spawnSync(process.execPath, [HOOK], {
   input: typeof entree === 'string' ? entree : JSON.stringify(entree),
   encoding: 'utf8',
@@ -145,5 +182,5 @@ test('hook : entrée illisible → code 1, l\'outil suit son cours', () => {
   const r = lancerHook(racine, '{ pas du json');
   assert.equal(r.status, 1);
   assert.equal(r.stdout, '');
-  assert.match(r.stderr, /garde-fou en erreur/);
+  assert.match(r.stderr, /^ProjectMind/);
 });
