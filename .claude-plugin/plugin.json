@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "description": "Garde la mémoire des décisions d'un projet et prévient avant de casser l'une d'elles.",
   "author": {
-    "name": "Diaguily SYLLA, Head of AI"
+    "name": "Diaguily SYLLA",
+    "email": "diaguilybouna@gmail.com",
+    "description": "Head of AI"
   }
 }
