@@ -6,7 +6,8 @@ import path from 'node:path';
 import { DOSSIER_DECISIONS, lireDecisions, normaliserChemin } from './adr.mjs';
 
 // Un ADR protège tant qu'il n'est pas explicitement inactif : mieux vaut protéger en trop.
-const STATUTS_INACTIFS = ['remplacee', 'abandonnee', 'rejetee'];
+// Un ADR « proposed » protège donc déjà. Statuts MADR, puis ceux d'avant la v2 (ADR-003).
+const STATUTS_INACTIFS = ['superseded', 'deprecated', 'rejected', 'remplacee', 'abandonnee', 'rejetee'];
 // Un ADR est lui-même protégé : changer son statut ou ses fichiers retirerait la protection sans rien demander.
 export const MOTIF_ADR = `${DOSSIER_DECISIONS}/ADR-*.md`;
 

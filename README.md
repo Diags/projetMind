@@ -71,29 +71,38 @@ puis `main`, puis `master`. Les options `--controle`, `--base` et `--sans-contro
 
 ## Format d'un ADR
 
+Compatible [MADR 4](https://adr.github.io/madr/) (voir ADR-003) :
+
 ```yaml
 ---
 id: ADR-001
-titre: "Les montants sont en centimes entiers"
-statut: acceptée
+title: "Les montants sont en centimes entiers"
+status: accepted
 date: 2026-10-05
-fichiers_proteges:
+protected_files:
   - "src/paiement/**"
   - "**/*.sql"
-raison: "Les flottants arrondissent mal ; un écart d'un centime casse le rapprochement."
-alternatives_rejetees:
+reason: "Les flottants arrondissent mal ; un écart d'un centime casse le rapprochement."
+rejected_alternatives:
   - "Décimaux en flottant : erreurs d'arrondi"
 ---
 ```
 
-Suivent les sections Contexte, Options étudiées, Décision et Conséquences.
+Suivent les sections de MADR : `## Context and Problem Statement`, `## Considered Options`
+(si renseignée), `## Decision Outcome` et `### Consequences` (si renseignée).
+`id`, `title`, `protected_files`, `reason` et `rejected_alternatives` sont propres à ProjectMind.
+
+**ADR d'avant la v2** : les noms français (`titre`, `statut`, `fichiers_proteges`, `raison`,
+`alternatives_rejetees`) restent lus. Si un champ a ses deux noms, l'anglais est retenu et
+l'anomalie est signalée.
 
 **Motifs** (relatifs à la racine du projet) : `*` reste dans un dossier, `**` traverse les
 dossiers, un chemin sans joker couvre aussi ce qu'il contient. `*.sql` ne vise que la racine,
 `**/*.sql` tout le projet.
 
-**Statut** : un ADR protège tant que son statut ne commence pas par « remplacée »,
-« abandonnée » ou « rejetée ».
+**Statut** : un ADR protège tant que son statut ne commence pas par `superseded`, `deprecated`
+ou `rejected` (ou, avant la v2, « remplacée », « abandonnée », « rejetée »). Un ADR `proposed`
+protège donc déjà.
 
 **En-tête écrit à la main** : textes nus ou entre guillemets, listes en tirets ou `[a, b]`,
 blocs `>` et `|`, commentaires `#`. Le reste du YAML n'est pas lu.

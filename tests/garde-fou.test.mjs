@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { creer } from '../scripts/lib/adr.mjs';
-import { correspond, cheminRelatif, protections } from '../scripts/lib/garde-fou.mjs';
+import { correspond, cheminRelatif, estActif, protections } from '../scripts/lib/garde-fou.mjs';
 import { decider } from '../scripts/lib/adaptateurs/claude-code.mjs';
 
 const HOOK = fileURLToPath(new URL('../hooks/garde-fou.mjs', import.meta.url));
@@ -24,7 +24,9 @@ function projet() {
   creer(racine, { ...ADR, titre: 'Migrations SQL', fichiers_proteges: ['**/*.sql'] });
   const { chemin } = creer(racine, { ...ADR, titre: 'Ancienne règle', fichiers_proteges: ['src/a.js'] });
   const fichier = path.join(racine, chemin);
-  fs.writeFileSync(fichier, fs.readFileSync(fichier, 'utf8').replace('statut: acceptée', 'statut: Remplacée par ADR-001'));
+  const texte = fs.readFileSync(fichier, 'utf8');
+  assert.match(texte, /\nstatus: accepted\n/);
+  fs.writeFileSync(fichier, texte.replace('status: accepted', 'status: superseded by ADR-001'));
   return racine;
 }
 
@@ -58,6 +60,15 @@ test('cheminRelatif : dans le projet ou hors du projet', () => {
   assert.equal(cheminRelatif(racine, path.join(racine, 'src', 'a.js')), 'src/a.js');
   assert.equal(cheminRelatif(racine, path.join(racine, '..', 'autre', 'a.js')), null);
   assert.equal(cheminRelatif(racine, racine), null);
+});
+
+test('estActif : un ADR protège tant que son statut ne le dit pas remplacé, abandonné ou rejeté', () => {
+  for (const statut of ['accepted', 'proposed', 'acceptée', 'Acceptée', '', undefined]) {
+    assert.equal(estActif({ statut }), true, String(statut));
+  }
+  for (const statut of ['superseded by ADR-002', 'Superseded', 'deprecated', 'rejected', 'Remplacée par ADR-002', 'abandonnée', 'rejetée']) {
+    assert.equal(estActif({ statut }), false, statut);
+  }
 });
 
 test('protections : les ADR actifs qui protègent le fichier, avec leurs motifs', () => {

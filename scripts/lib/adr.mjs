@@ -1,6 +1,6 @@
-// Lecture et écriture des ADR de ProjectMind : docs/decisions/ADR-NNN-<slug>.md.
-// Sans dépendance. L'en-tête est un sous-ensemble de YAML (voir analyserEnTete) :
-// le script écrit toujours les textes entre guillemets, un humain peut les retirer.
+// Lecture et écriture des ADR de ProjectMind : docs/decisions/ADR-NNN-<slug>.md, au format
+// compatible MADR (ADR-003). Sans dépendance. L'en-tête est un sous-ensemble de YAML (voir
+// analyserEnTete) : le script écrit toujours les textes entre guillemets, un humain peut les retirer.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,6 +10,14 @@ const MOTIF_NOM = /^ADR-(\d+)-.+\.md$/i;
 const CHAMPS_TEXTE = ['titre', 'raison', 'contexte', 'options', 'decision', 'consequences'];
 const CHAMPS_LISTE = ['fichiers_proteges', 'alternatives_rejetees'];
 const OBLIGATOIRES = ['titre', 'raison', 'contexte', 'decision'];
+// Sur disque et en entrée, les champs portent leur nom anglais (ADR-003). Le code garde ses noms
+// français jusqu'à sa traduction, et les noms français des ADR d'avant la v2 restent lus.
+const NOM_ANGLAIS = {
+  titre: 'title', statut: 'status', raison: 'reason', contexte: 'context', options: 'options', decision: 'decision',
+  consequences: 'consequences', fichiers_proteges: 'protected_files', alternatives_rejetees: 'rejected_alternatives',
+};
+const VERS_INTERNE = Object.fromEntries(Object.entries(NOM_ANGLAIS).map(([interne, anglais]) => [anglais, interne]));
+const interne = (cle) => (Object.hasOwn(VERS_INTERNE, cle) ? VERS_INTERNE[cle] : cle);
 
 export class ErreurAdr extends Error {
   constructor(erreurs) {
@@ -67,20 +75,24 @@ function preparer(entree) {
   }
   const erreurs = [];
   const adr = {};
+  const valeurs = {};
   for (const cle of Object.keys(entree)) {
-    if (!CHAMPS_TEXTE.includes(cle) && !CHAMPS_LISTE.includes(cle)) erreurs.push(`clé inconnue : « ${cle} »`);
+    const champ = interne(cle);
+    if (!CHAMPS_TEXTE.includes(champ) && !CHAMPS_LISTE.includes(champ)) erreurs.push(`clé inconnue : « ${cle} »`);
+    else if (Object.hasOwn(valeurs, champ)) erreurs.push(`« ${NOM_ANGLAIS[champ]} » donné deux fois, en anglais et en français`);
+    else valeurs[champ] = entree[cle];
   }
   for (const cle of CHAMPS_TEXTE) {
-    const v = entree[cle] ?? '';
-    if (typeof v !== 'string') erreurs.push(`« ${cle} » doit être un texte`);
+    const v = valeurs[cle] ?? '';
+    if (typeof v !== 'string') erreurs.push(`« ${NOM_ANGLAIS[cle]} » doit être un texte`);
     adr[cle] = typeof v === 'string' ? v.trim() : '';
-    if (OBLIGATOIRES.includes(cle) && !adr[cle] && typeof v === 'string') erreurs.push(`« ${cle} » est obligatoire`);
+    if (OBLIGATOIRES.includes(cle) && !adr[cle] && typeof v === 'string') erreurs.push(`« ${NOM_ANGLAIS[cle]} » est obligatoire`);
   }
-  if (/[\r\n]/.test(adr.titre)) erreurs.push('« titre » doit tenir sur une ligne');
+  if (/[\r\n]/.test(adr.titre)) erreurs.push('« title » doit tenir sur une ligne');
   for (const cle of CHAMPS_LISTE) {
-    const v = entree[cle] ?? [];
+    const v = valeurs[cle] ?? [];
     if (!Array.isArray(v) || v.some((x) => typeof x !== 'string' || !x.trim())) {
-      erreurs.push(`« ${cle} » doit être une liste de textes non vides`);
+      erreurs.push(`« ${NOM_ANGLAIS[cle]} » doit être une liste de textes non vides`);
       adr[cle] = [];
     } else {
       adr[cle] = v.map((x) => x.trim());
@@ -95,27 +107,29 @@ function preparer(entree) {
   return { adr, erreurs };
 }
 
+// En-tête et sections de MADR 4 ; id, title, protected_files, reason et rejected_alternatives sont
+// propres à ProjectMind. Les sections facultatives vides sont omises, comme le prévoit MADR.
 export function serialiser(id, adr, date) {
   const q = (s) => JSON.stringify(s);
   const liste = (cle, valeurs) => (valeurs.length ? [`${cle}:`, ...valeurs.map((v) => `  - ${q(v)}`)] : [`${cle}: []`]);
-  const section = (titre, texte) => [`## ${titre}`, '', texte || '_Non renseigné._', ''];
+  const section = (titre, texte) => (texte ? [titre, '', texte, ''] : []);
   return [
     '---',
     `id: ${id}`,
-    `titre: ${q(adr.titre)}`,
-    'statut: acceptée',
+    `title: ${q(adr.titre)}`,
+    'status: accepted',
     `date: ${date}`,
-    ...liste('fichiers_proteges', adr.fichiers_proteges),
-    `raison: ${q(adr.raison)}`,
-    ...liste('alternatives_rejetees', adr.alternatives_rejetees),
+    ...liste('protected_files', adr.fichiers_proteges),
+    `reason: ${q(adr.raison)}`,
+    ...liste('rejected_alternatives', adr.alternatives_rejetees),
     '---',
     '',
     `# ${id} — ${adr.titre}`,
     '',
-    ...section('Contexte', adr.contexte),
-    ...section('Options étudiées', adr.options),
-    ...section('Décision', adr.decision),
-    ...section('Conséquences', adr.consequences),
+    ...section('## Context and Problem Statement', adr.contexte),
+    ...section('## Considered Options', adr.options),
+    ...section('## Decision Outcome', adr.decision),
+    ...section('### Consequences', adr.consequences),
   ].join('\n');
 }
 
@@ -262,6 +276,22 @@ function lireBloc(type, suite) {
   return texte.join('\n').split(/\n\s*\n/).map((p) => p.split('\n').map((l) => l.trim()).join(' ')).join('\n');
 }
 
+// Noms anglais de l'en-tête → noms internes ; les noms français d'avant la v2 passent tels quels.
+// nomLu garde la clé écrite dans le fichier, pour que les messages la citent telle quelle.
+function versInterne(donnees, erreurs) {
+  const d = { ...donnees };
+  const nomLu = {};
+  for (const [champ, anglais] of Object.entries(NOM_ANGLAIS)) {
+    if (Object.hasOwn(d, champ)) nomLu[champ] = champ;
+    if (anglais === champ || !Object.hasOwn(d, anglais)) continue;
+    if (Object.hasOwn(d, champ)) erreurs.push(`« ${anglais} » et « ${champ} » désignent le même champ : « ${anglais} » est retenu`);
+    d[champ] = d[anglais];
+    delete d[anglais];
+    nomLu[champ] = anglais;
+  }
+  return { d, nomLu };
+}
+
 // Lit tous les ADR du projet, triés par numéro. Une anomalie est signalée dans
 // « erreurs » sans faire disparaître la décision : mieux vaut protéger en trop.
 export function lireDecisions(racine) {
@@ -272,16 +302,16 @@ export function lireDecisions(racine) {
     .sort((a, b) => numeroDe(a) - numeroDe(b))
     .map((nom) => {
       const { donnees, erreurs } = analyserEnTete(fs.readFileSync(path.join(dossier, nom), 'utf8'));
-      const d = { ...donnees };
+      const { d, nomLu } = versInterne(donnees ?? {}, erreurs);
       for (const cle of CHAMPS_LISTE) {
         if (d[cle] === undefined || d[cle] === '') d[cle] = [];
         else if (!Array.isArray(d[cle])) {
-          erreurs.push(`« ${cle} » devrait être une liste`);
+          erreurs.push(`« ${nomLu[cle]} » devrait être une liste`);
           d[cle] = [d[cle]];
         }
       }
       d.fichiers_proteges = d.fichiers_proteges.map(normaliserChemin);
-      if (donnees && !d.raison) erreurs.push('« raison » manquante');
+      if (donnees && !d.raison) erreurs.push(`« ${nomLu.raison ?? 'reason'} » manquante`);
       const attendu = formaterId(numeroDe(nom));
       if (donnees && d.id !== attendu) erreurs.push(`« id » vaut ${d.id ?? '(rien)'} mais le nom du fichier donne ${attendu}`);
       return { fichier: `${DOSSIER_DECISIONS}/${nom}`, ...d, erreurs };

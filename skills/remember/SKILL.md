@@ -30,11 +30,11 @@ Si aucune décision n'est donnée ci-dessus, demande laquelle enregistrer et arr
 
 | Champ | Contenu |
 |---|---|
-| `titre` | La décision en une phrase courte, sur une ligne. |
-| `raison` | Pourquoi, en une ou deux phrases. Elle sera montrée à qui touchera un fichier protégé. |
-| `fichiers_proteges` | Chemins relatifs à la racine du projet ou motifs glob. `*` reste dans un dossier, `**` traverse les dossiers, un chemin sans joker couvre aussi ce qu'il contient : `runtime` protège tout `runtime/`, `*.sql` ne vise que la racine, `**/*.sql` vise tout le projet. Vérifie avec Glob qu'ils désignent des fichiers existants. Liste vide si la décision ne protège aucun fichier. |
-| `alternatives_rejetees` | Options écartées, chacune suivie de sa raison en quelques mots. Liste vide s'il n'y en a pas. |
-| `contexte` | Le problème qui a mené à la décision. |
+| `title` | La décision en une phrase courte, sur une ligne. |
+| `reason` | Pourquoi, en une ou deux phrases. Elle sera montrée à qui touchera un fichier protégé. |
+| `protected_files` | Chemins relatifs à la racine du projet ou motifs glob. `*` reste dans un dossier, `**` traverse les dossiers, un chemin sans joker couvre aussi ce qu'il contient : `runtime` protège tout `runtime/`, `*.sql` ne vise que la racine, `**/*.sql` vise tout le projet. Vérifie avec Glob qu'ils désignent des fichiers existants. Liste vide si la décision ne protège aucun fichier. |
+| `rejected_alternatives` | Options écartées, chacune suivie de sa raison en quelques mots. Liste vide s'il n'y en a pas. |
+| `context` | Le problème qui a mené à la décision. |
 | `options` | Les options étudiées. Facultatif. |
 | `decision` | Ce qui est décidé, précisément. |
 | `consequences` | Effets positifs et négatifs. Facultatif. |
@@ -45,7 +45,7 @@ L'aperçu n'écrit rien :
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" creer --essai --racine "${CLAUDE_PROJECT_DIR}" <<'JSON'
-{ "titre": "…", "raison": "…", "fichiers_proteges": ["…"], "alternatives_rejetees": ["…"], "contexte": "…", "options": "…", "decision": "…", "consequences": "…" }
+{ "title": "…", "reason": "…", "protected_files": ["…"], "rejected_alternatives": ["…"], "context": "…", "options": "…", "decision": "…", "consequences": "…" }
 JSON
 ```
 
