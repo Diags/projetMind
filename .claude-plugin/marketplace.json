@@ -1,0 +1,14 @@
+{
+  "name": "projectmind",
+  "description": "Catalogue interne de ProjectMind : la mémoire des décisions d'un projet.",
+  "owner": {
+    "name": "Diaguily SYLLA, Head of AI"
+  },
+  "plugins": [
+    {
+      "name": "projectmind",
+      "source": "./",
+      "description": "Garde la mémoire des décisions d'un projet et prévient avant de casser l'une d'elles."
+    }
+  ]
+}

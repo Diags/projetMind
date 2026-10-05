@@ -16,9 +16,37 @@ Le plugin, lui, ne stocke rien.
 | `/projectmind:release-check` | Rapport ✓/⚠/✗ d'une branche contre sa base : commande de contrôle du projet, fichiers protégés et ADR touchés, secrets dans ce que la branche ajoute (gitleaks s'il est installé, sinon quelques motifs intégrés). Un secret n'est jamais affiché, seulement son fichier, sa ligne et son type. Ne corrige rien, ne fait aucun fetch. |
 | Garde-fou | Avant que Claude modifie un fichier protégé par un ADR, Claude Code demande confirmation en citant l'ADR, sa raison et ses alternatives rejetées. Les fichiers ADR eux-mêmes sont protégés. |
 
-## Installer en local
+## Installer depuis le catalogue interne
 
-Prérequis : Node (testé avec la version 24.16).
+Ce dépôt est à la fois le plugin et son catalogue (`.claude-plugin/marketplace.json`).
+Prérequis : Node (testé avec la version 24.16) et un accès en lecture au dépôt GitHub.
+
+```bash
+claude plugin marketplace add Diags/projetMind
+claude plugin install projectmind@projectmind
+```
+
+Le dépôt est privé : git doit déjà avoir un identifiant enregistré, car Claude Code n'en
+demande pas. Sur GitHub : `gh auth login` puis `gh auth setup-git`. Sans clé SSH GitHub,
+définir `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` avant l'ajout.
+
+**Pour toute l'équipe d'un projet** : dans ce projet, lancer une fois
+`claude plugin marketplace add Diags/projetMind --scope project`, puis commiter le
+`.claude/settings.json` écrit. Chaque collègue qui fait confiance au dossier reçoit le catalogue.
+
+**Mises à jour** : désactivées par défaut. `claude plugin update projectmind@projectmind`,
+ou `/plugin` → Marketplaces → projectmind → Enable auto-update.
+
+## Publier une nouvelle version
+
+Les collègues ne reçoivent une nouvelle version que si `version` change dans
+`.claude-plugin/plugin.json` : un commit sans changement de version ne leur parvient pas.
+
+1. Monter `version` dans `plugin.json` (pas dans `marketplace.json`).
+2. `node --test` et `claude plugin validate . --strict`.
+3. Commiter, puis `claude plugin tag` pour poser le tag `projectmind--v<version>`, et pousser.
+
+## Développer en local
 
 ```bash
 cd <ton projet>
