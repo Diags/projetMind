@@ -12,6 +12,8 @@ Le plugin, lui, ne stocke rien.
 | | |
 |---|---|
 | `/projectmind:remember <décision>` | Prépare un ADR numéroté (`docs/decisions/ADR-NNN-<slug>.md`), en montre l'aperçu, et ne l'écrit qu'après ton « oui ». Seul l'utilisateur peut lancer cette commande. |
+| `/projectmind:why <fichier>` | Dit ce que le projet sait d'un fichier : ADR qui le protègent ou le citent, mentions dans tous les `.md` suivis par git (les registres existants, sans les déclarer), 5 derniers commits. Chaque élément donne sa source (`DETTE.md:110`, `ADR-001`, hash). Ne modifie rien. |
+| `/projectmind:release-check` | Rapport ✓/⚠/✗ d'une branche contre sa base : commande de contrôle du projet, fichiers protégés et ADR touchés, secrets dans ce que la branche ajoute (gitleaks s'il est installé, sinon quelques motifs intégrés). Un secret n'est jamais affiché, seulement son fichier, sa ligne et son type. Ne corrige rien, ne fait aucun fetch. |
 | Garde-fou | Avant que Claude modifie un fichier protégé par un ADR, Claude Code demande confirmation en citant l'ADR, sa raison et ses alternatives rejetées. Les fichiers ADR eux-mêmes sont protégés. |
 
 ## Installer en local
@@ -25,6 +27,18 @@ claude --plugin-dir <chemin vers ProjetMind>
 
 `/plugin` → onglet « Installed » : `projectmind` doit y figurer.
 Après une modification du plugin : `/reload-plugins`.
+
+## Réglage du projet
+
+`.claude/projectmind.json`, versionné avec le projet :
+
+```json
+{ "controle": "PYTHONUTF8=1 ./outillage/verifier.sh tests", "base": "main" }
+```
+
+`controle` est lancé avec `bash` à la racine du projet. Sans `base`, la base est `origin/HEAD`,
+puis `main`, puis `master`. Les options `--controle`, `--base` et `--sans-controle` de
+`/projectmind:release-check` remplacent ce réglage.
 
 ## Format d'un ADR
 
@@ -61,6 +75,9 @@ blocs `>` et `|`, commentaires `#`. Le reste du YAML n'est pas lu.
   en mode auto, et une autorisation en mode `bypassPermissions`.
 - **Shell.** Une écriture par commande (`sed -i`, `>`, `rm`) n'est pas surveillée : seuls les
   outils Edit, Write, MultiEdit et NotebookEdit le sont.
+- **Contrôle avant livraison.** Le verdict ne connaît pas les échecs propres à un poste : c'est à
+  Claude de les expliquer en citant la doc du projet. Les secrets ne sont cherchés que dans les
+  commits de la branche, pas dans les modifications non commitées.
 - **Erreur du garde-fou.** S'il plante, la modification passe (code 1, message sur stderr) :
   il ne bloque jamais le travail.
 
