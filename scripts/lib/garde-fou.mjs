@@ -9,7 +9,7 @@ const OUTILS = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', 
 // Un ADR protège tant qu'il n'est pas explicitement inactif : mieux vaut protéger en trop.
 const STATUTS_INACTIFS = ['remplacee', 'abandonnee', 'rejetee'];
 // Un ADR est lui-même protégé : changer son statut ou ses fichiers retirerait la protection sans rien demander.
-const MOTIF_ADR = `${DOSSIER_DECISIONS}/ADR-*.md`;
+export const MOTIF_ADR = `${DOSSIER_DECISIONS}/ADR-*.md`;
 
 const simplifier = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
@@ -37,7 +37,7 @@ export function cheminRelatif(racine, fichier) {
   return rel;
 }
 
-const estActif = (adr) => !STATUTS_INACTIFS.some((s) => simplifier(adr.statut ?? '').startsWith(s));
+export const estActif = (adr) => !STATUTS_INACTIFS.some((s) => simplifier(adr.statut ?? '').startsWith(s));
 
 // Rend la sortie JSON du hook, ou null si l'outil peut suivre son cours.
 export function decider(entree, racine) {
