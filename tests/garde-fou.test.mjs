@@ -105,6 +105,18 @@ test('decider : un fichier protégé par plusieurs ADR les cite tous', () => {
   assert.match(raison, /ADR-004/);
 });
 
+test('decider : modifier ou créer un ADR à la main demande confirmation', () => {
+  const racine = projet();
+  const modifier = decider(appel(racine, 'Edit', 'docs/decisions/ADR-001-runtime-fige.md'), racine);
+  assert.equal(modifier.hookSpecificOutput.permissionDecision, 'ask');
+  const raison = modifier.hookSpecificOutput.permissionDecisionReason;
+  assert.match(raison, /Ce fichier est un ADR/);
+  assert.doesNotMatch(raison, /mets alors l'ADR à jour/, 'aucun ADR ne protège ce fichier par motif');
+  assert.match(decider(appel(racine, 'Write', 'docs/decisions/ADR-009-nouveau.md'), racine).hookSpecificOutput.permissionDecisionReason, /est un ADR/);
+  assert.equal(decider(appel(racine, 'Write', 'docs/decisions/notes.md'), racine), null);
+  assert.equal(decider(appel(racine, 'Write', 'docs/ADR-001-ailleurs.md'), racine), null);
+});
+
 // Le faux appel du critère du lot 3 : le script du hook, tel que Claude Code le lance.
 const lancerHook = (racine, entree) => spawnSync(process.execPath, [HOOK], {
   input: typeof entree === 'string' ? entree : JSON.stringify(entree),

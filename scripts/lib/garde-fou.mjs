@@ -2,12 +2,14 @@
 // la demande de confirmation renvoyée par le hook PreToolUse.
 
 import path from 'node:path';
-import { lireDecisions, normaliserChemin } from './adr.mjs';
+import { DOSSIER_DECISIONS, lireDecisions, normaliserChemin } from './adr.mjs';
 
 // Outil de modification → champ de tool_input qui porte le chemin du fichier.
 const OUTILS = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' };
 // Un ADR protège tant qu'il n'est pas explicitement inactif : mieux vaut protéger en trop.
 const STATUTS_INACTIFS = ['remplacee', 'abandonnee', 'rejetee'];
+// Un ADR est lui-même protégé : changer son statut ou ses fichiers retirerait la protection sans rien demander.
+const MOTIF_ADR = `${DOSSIER_DECISIONS}/ADR-*.md`;
 
 const simplifier = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
@@ -44,21 +46,22 @@ export function decider(entree, racine) {
   if (typeof fichier !== 'string' || !fichier) return null;
   const rel = cheminRelatif(racine, fichier);
   if (!rel) return null;
+  const estUnAdr = correspond(MOTIF_ADR, rel);
   const touchees = lireDecisions(racine)
     .filter(estActif)
     .map((adr) => ({ adr, motifs: adr.fichiers_proteges.filter((m) => correspond(m, rel)) }))
     .filter((t) => t.motifs.length);
-  if (!touchees.length) return null;
+  if (!estUnAdr && !touchees.length) return null;
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'ask',
-      permissionDecisionReason: rediger(rel, touchees),
+      permissionDecisionReason: rediger(rel, estUnAdr, touchees),
     },
   };
 }
 
-function rediger(rel, touchees) {
+function rediger(rel, estUnAdr, touchees) {
   const blocs = touchees.map(({ adr, motifs }) => [
     `${adr.id ?? '?'} — ${adr.titre ?? '(sans titre)'} [motif : ${motifs.join(', ')}]`,
     `Raison : ${adr.raison ?? '(non renseignée)'}`,
@@ -68,7 +71,8 @@ function rediger(rel, touchees) {
   ].join('\n'));
   return [
     `ProjectMind : ${rel} est protégé par une décision.`,
+    ...(estUnAdr ? ['Ce fichier est un ADR : le modifier change une décision enregistrée (son statut, ses fichiers protégés…). Confirme seulement si la décision a été revue.'] : []),
     ...blocs,
-    "Confirme seulement si tu reviens sur cette décision, et mets alors l'ADR à jour.",
+    ...(touchees.length ? ["Confirme seulement si tu reviens sur cette décision, et mets alors l'ADR à jour."] : []),
   ].join('\n\n');
 }
