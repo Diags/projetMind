@@ -1,0 +1,74 @@
+// Garde-fou de ProjectMind : retrouve les ADR qui protègent un fichier et rédige
+// la demande de confirmation renvoyée par le hook PreToolUse.
+
+import path from 'node:path';
+import { lireDecisions, normaliserChemin } from './adr.mjs';
+
+// Outil de modification → champ de tool_input qui porte le chemin du fichier.
+const OUTILS = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' };
+// Un ADR protège tant qu'il n'est pas explicitement inactif : mieux vaut protéger en trop.
+const STATUTS_INACTIFS = ['remplacee', 'abandonnee', 'rejetee'];
+
+const simplifier = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+
+// Motifs relatifs à la racine du projet : « * » reste dans un dossier, « ** » traverse
+// les dossiers, et un motif sans joker couvre aussi ce qu'il contient.
+export function correspond(motif, chemin, sensibleALaCasse = process.platform !== 'win32') {
+  const m = normaliserChemin(motif).replace(/\/+$/, '');
+  if (!m) return false;
+  let re = '';
+  for (let k = 0; k < m.length; k++) {
+    if (m.startsWith('**/', k)) { re += '(?:.*/)?'; k += 2; }
+    else if (m.startsWith('**', k)) { re += '.*'; k += 1; }
+    else if (m[k] === '*') re += '[^/]*';
+    else if (m[k] === '?') re += '[^/]';
+    else re += m[k].replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  }
+  const contenu = /[*?]/.test(m) ? '' : '(?:/.*)?';
+  return new RegExp(`^${re}${contenu}$`, sensibleALaCasse ? '' : 'i').test(chemin);
+}
+
+// Chemin du fichier relatif à la racine, ou null s'il est hors du projet.
+export function cheminRelatif(racine, fichier) {
+  const rel = normaliserChemin(path.relative(racine, path.resolve(racine, fichier)));
+  if (!rel || rel === '..' || rel.startsWith('../') || rel.startsWith('/') || /^[A-Za-z]:/.test(rel)) return null;
+  return rel;
+}
+
+const estActif = (adr) => !STATUTS_INACTIFS.some((s) => simplifier(adr.statut ?? '').startsWith(s));
+
+// Rend la sortie JSON du hook, ou null si l'outil peut suivre son cours.
+export function decider(entree, racine) {
+  const champ = OUTILS[entree?.tool_name];
+  const fichier = champ && entree.tool_input?.[champ];
+  if (typeof fichier !== 'string' || !fichier) return null;
+  const rel = cheminRelatif(racine, fichier);
+  if (!rel) return null;
+  const touchees = lireDecisions(racine)
+    .filter(estActif)
+    .map((adr) => ({ adr, motifs: adr.fichiers_proteges.filter((m) => correspond(m, rel)) }))
+    .filter((t) => t.motifs.length);
+  if (!touchees.length) return null;
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'ask',
+      permissionDecisionReason: rediger(rel, touchees),
+    },
+  };
+}
+
+function rediger(rel, touchees) {
+  const blocs = touchees.map(({ adr, motifs }) => [
+    `${adr.id ?? '?'} — ${adr.titre ?? '(sans titre)'} [motif : ${motifs.join(', ')}]`,
+    `Raison : ${adr.raison ?? '(non renseignée)'}`,
+    ...(adr.alternatives_rejetees.length ? [`Alternatives rejetées : ${adr.alternatives_rejetees.join(' ; ')}`] : []),
+    ...(adr.erreurs.length ? [`⚠ ADR à corriger : ${adr.erreurs.join(' ; ')}`] : []),
+    `Source : ${adr.fichier}`,
+  ].join('\n'));
+  return [
+    `ProjectMind : ${rel} est protégé par une décision.`,
+    ...blocs,
+    "Confirme seulement si tu reviens sur cette décision, et mets alors l'ADR à jour.",
+  ].join('\n\n');
+}
