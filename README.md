@@ -16,6 +16,23 @@ The plugin itself stores nothing.
 | `/projectmind:release-check` | ✓/⚠/✗ report on a branch against its base: the project's check command, protected files and ADRs touched, secrets in what the branch adds (gitleaks when installed, otherwise a few built-in patterns). A secret is never shown, only its file, line and type. Fixes nothing, never fetches. |
 | Guard | Before Claude edits a file protected by an ADR, Claude Code asks for confirmation, citing the ADR, its reason and its rejected alternatives. ADR files themselves are protected. |
 
+## What it runs, reads and writes
+
+Everything runs locally, with Node and the project's own tools. The plugin sends nothing over the
+network, fetches nothing, and has no telemetry.
+
+- **Runs**: its own Node scripts in `scripts/` and `hooks/`; read-only `git` commands (`ls-files`,
+  `log`, `diff`, `status`, `rev-parse`, `rev-list`, `merge-base`, `symbolic-ref`); `gitleaks` when it is
+  installed; and, for `/projectmind:release-check` only, the check command the project declares in
+  `.projectmind.json` or passes with `--check`, through `bash` at the project root.
+- **Reads**: the ADRs in `docs/decisions/`, the `.md` files tracked by git, the project setting
+  (`.projectmind.json`, or `.claude/projectmind.json`), and the hook input that Claude Code sends.
+- **Writes**: a new ADR in `docs/decisions/`, only after the user's "yes" in
+  `/projectmind:remember`; the check command's full log in the system's temporary folder
+  (`projectmind-check-*.log`); and a temporary gitleaks report, deleted right after reading it.
+  Nothing else: it never commits, pushes or edits the project's files. The project's check command
+  does what the project wrote it to do, including writing files.
+
 ## Install
 
 This repository is both the plugin and its catalog (`.claude-plugin/marketplace.json`).
@@ -124,3 +141,7 @@ claude plugin validate ./skills --strict
 ```
 
 `docs/decisions/` holds ProjectMind's own decisions. `SCOPING.md` gives the v1 plan in lots.
+
+## License
+
+[MIT](LICENSE) © 2026 Diaguily SYLLA
