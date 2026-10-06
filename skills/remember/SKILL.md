@@ -1,47 +1,48 @@
 ---
 name: remember
-description: Enregistre une décision du projet dans docs/decisions/ sous forme d'ADR numéroté, avec les fichiers qu'elle protège, la raison et les alternatives rejetées.
-argument-hint: "[décision à enregistrer]"
+description: Records a project decision in docs/decisions/ as a numbered ADR, with the files it protects, the reason and the rejected alternatives.
+argument-hint: "[decision to record]"
 disable-model-invocation: true
 allowed-tools:
   - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" list *)
   - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" create --dry-run *)
 ---
 
-# Enregistrer une décision
+# Record a decision
 
-Décision à enregistrer : $ARGUMENTS
+Decision to record: $ARGUMENTS
 
-Tu proposes, l'utilisateur valide. Rien n'est écrit sans un « oui » explicite de sa part dans le chat.
-N'invente ni raison, ni fichier, ni alternative : ce que la conversation ou le dépôt ne dit pas, demande-le.
-Ne choisis pas le numéro de l'ADR : le script le calcule.
+You propose, the user approves. Nothing is written without an explicit "yes" from them in the chat.
+Do not invent a reason, a file or an alternative: whatever the conversation or the repository does not say, ask for it.
+Do not choose the ADR number: the script computes it.
+Reply in the user's language.
 
-Si aucune décision n'est donnée ci-dessus, demande laquelle enregistrer et arrête-toi là.
+If no decision is given above, ask which one to record and stop there.
 
-## 1. Vérifier l'existant
+## 1. Check what already exists
 
-- Lis les ADR déjà enregistrés :
+- Read the ADRs already recorded:
   `node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" list --root "${CLAUDE_PROJECT_DIR}"`
-  Si l'un traite déjà du sujet, cite-le et demande s'il faut un nouvel ADR.
-- Si le projet tient déjà un registre de décisions ailleurs (invariants, cicatrices, dette… cité dans
-  `CLAUDE.md` ou le `README`), signale-le : la décision y figure peut-être déjà. Pas de doublon sans accord.
+  If one already covers the topic, cite it and ask whether a new ADR is needed.
+- If the project already keeps a decision register elsewhere (invariants, lessons learned, debt… cited in
+  `CLAUDE.md` or the `README`), say so: the decision may already be there. No duplicate without agreement.
 
-## 2. Préparer les champs
+## 2. Prepare the fields
 
-| Champ | Contenu |
+| Field | Content |
 |---|---|
-| `title` | La décision en une phrase courte, sur une ligne. |
-| `reason` | Pourquoi, en une ou deux phrases. Elle sera montrée à qui touchera un fichier protégé. |
-| `protected_files` | Chemins relatifs à la racine du projet ou motifs glob. `*` reste dans un dossier, `**` traverse les dossiers, un chemin sans joker couvre aussi ce qu'il contient : `runtime` protège tout `runtime/`, `*.sql` ne vise que la racine, `**/*.sql` vise tout le projet. Vérifie avec Glob qu'ils désignent des fichiers existants. Liste vide si la décision ne protège aucun fichier. |
-| `rejected_alternatives` | Options écartées, chacune suivie de sa raison en quelques mots. Liste vide s'il n'y en a pas. |
-| `context` | Le problème qui a mené à la décision. |
-| `options` | Les options étudiées. Facultatif. |
-| `decision` | Ce qui est décidé, précisément. |
-| `consequences` | Effets positifs et négatifs. Facultatif. |
+| `title` | The decision in one short sentence, on one line. |
+| `reason` | Why, in one or two sentences. It will be shown to whoever touches a protected file. |
+| `protected_files` | Paths relative to the project root, or glob patterns. `*` stays within a folder, `**` crosses folders, a path without wildcards also covers what it contains: `runtime` protects all of `runtime/`, `*.sql` only targets the root, `**/*.sql` targets the whole project. Check with Glob that they match existing files. Empty list if the decision protects no file. |
+| `rejected_alternatives` | Options set aside, each followed by its reason in a few words. Empty list if there are none. |
+| `context` | The problem that led to the decision. |
+| `options` | The options considered. Optional. |
+| `decision` | What is decided, precisely. |
+| `consequences` | Positive and negative effects. Optional. |
 
-## 3. Montrer l'aperçu
+## 3. Show the preview
 
-L'aperçu n'écrit rien :
+The preview writes nothing:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" create --dry-run --root "${CLAUDE_PROJECT_DIR}" <<'JSON'
@@ -49,10 +50,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" create --dry-run --root "${CLAUDE_P
 JSON
 ```
 
-Montre la sortie telle quelle, puis demande : « J'enregistre cet ADR ? ».
-Si l'utilisateur corrige un point, refais l'aperçu avant de redemander.
+Show the output as is, then ask: "Shall I record this ADR?".
+If the user corrects a point, redo the preview before asking again.
 
-## 4. Écrire, après accord seulement
+## 4. Write, only after agreement
 
-Relance la même commande, avec le même JSON, sans `--dry-run`.
-Donne le chemin du fichier créé. Ne fais ni commit ni push.
+Run the same command again, with the same JSON, without `--dry-run`.
+Give the path of the created file. Do not commit or push.

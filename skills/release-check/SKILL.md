@@ -1,26 +1,26 @@
 ---
 name: release-check
-description: Rapport ✓/⚠/✗ avant de livrer une branche — commande de contrôle du projet, ADR touchés, secrets dans ce que la branche ajoute. Ne corrige rien.
+description: ✓/⚠/✗ report before releasing a branch — the project's check command, ADRs touched, secrets in what the branch adds. Fixes nothing.
 argument-hint: "[--base <ref>] [--check \"<command>\"] [--no-check]"
 disable-model-invocation: true
 ---
 
-# Contrôle avant livraison
+# Release check
 
-Options données : $ARGUMENTS
+Options given: $ARGUMENTS
 
-Ne corrige rien, ne commite rien, ne pousse rien, ne fais pas de fetch.
+Fix nothing, commit nothing, push nothing, do not fetch. Reply in the user's language.
 
-1. Lance le contrôle, avec un délai de 10 minutes car la commande du projet peut être longue :
+1. Run the check, with a 10-minute timeout because the project's command may be long:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/release-check.mjs" --root "${CLAUDE_PROJECT_DIR}" $ARGUMENTS`
-   La commande de contrôle et la base viennent de `.projectmind.json`, à défaut de
-   `.claude/projectmind.json` (`{ "check": "…", "base": "main" }`) ; les options les remplacent.
-2. Montre le rapport tel quel.
-3. Pour chaque ✗ et chaque ⚠, une phrase : ce que ça veut dire, et quoi faire.
-   - Pour comprendre un échec de la commande, lis le journal complet indiqué dans le rapport.
-   - Si le projet documente comment lire sa commande de contrôle (un skill, `CLAUDE.md`, le `README`),
-     par exemple des échecs connus propres à un poste, applique-le en citant la source.
-     Sans source, n'excuse aucun rouge.
-4. Secrets : n'ouvre jamais une ligne signalée, ne lis pas sa valeur, ne la répète pas.
-   Dis où elle est, et qu'il faut la révoquer puis la retirer de l'historique.
-5. Termine par le verdict du rapport, sans l'adoucir.
+   The check command and the base come from `.projectmind.json`, or failing that from
+   `.claude/projectmind.json` (`{ "check": "…", "base": "main" }`); the options override them.
+2. Show the report as is.
+3. For each ✗ and each ⚠, one sentence: what it means, and what to do.
+   - To understand a failing command, read the full log given in the report.
+   - If the project documents how to read its check command (a skill, `CLAUDE.md`, the `README`),
+     for example known failures specific to one machine, apply it and cite the source.
+     Without a source, excuse no red.
+4. Secrets: never open a reported line, do not read its value, do not repeat it.
+   Say where it is, and that it must be revoked and then removed from history.
+5. End with the report's verdict, without softening it.

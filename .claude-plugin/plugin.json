@@ -1,7 +1,7 @@
 {
   "name": "projectmind",
   "version": "1.0.0",
-  "description": "Garde la mémoire des décisions d'un projet et prévient avant de casser l'une d'elles.",
+  "description": "Keeps the memory of a project's decisions and warns before one of them is broken.",
   "author": {
     "name": "Diaguily SYLLA",
     "email": "diaguilybouna@gmail.com",

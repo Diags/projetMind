@@ -1,23 +1,23 @@
 ---
 name: why
-description: Montre ce que le projet sait d'un fichier — ADR qui le protègent ou le citent, mentions dans la documentation existante, derniers commits — avec la source de chaque élément.
-argument-hint: "<fichier>"
+description: Shows what the project knows about a file — ADRs that protect or cite it, mentions in the existing documentation, last commits — with the source of each item.
+argument-hint: "<file>"
 disable-model-invocation: true
 allowed-tools:
   - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/why.mjs" *)
 ---
 
-# Pourquoi ce fichier ?
+# Why this file?
 
-Fichier demandé : $ARGUMENTS
+Requested file: $ARGUMENTS
 
-Si aucun fichier n'est donné ci-dessus, demande lequel et arrête-toi là.
-Ne modifie aucun fichier.
+If no file is given above, ask which one and stop there.
+Do not modify any file. Reply in the user's language.
 
-1. Lance la recherche, avec le chemin tel que l'utilisateur l'a donné :
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/why.mjs" --root "${CLAUDE_PROJECT_DIR}" "<fichier>"`
-2. Montre la sortie telle quelle.
-3. Ajoute un résumé de trois phrases au plus, tiré uniquement de ce que la sortie cite.
-   Chaque affirmation renvoie à sa source : `ADR-001`, `DETTE.md:110`, commit `a1b2c3d`.
-   Tu peux ouvrir une source citée pour lire le paragraphe autour de la ligne, rien d'autre.
-4. Si la sortie ne trouve rien, dis-le en une phrase. N'invente pas de raison et ne la déduis pas du code.
+1. Run the search, with the path as the user gave it:
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/why.mjs" --root "${CLAUDE_PROJECT_DIR}" "<file>"`
+2. Show the output as is.
+3. Add a summary of three sentences at most, drawn only from what the output cites.
+   Each claim points to its source: `ADR-001`, `DEBT.md:110`, commit `a1b2c3d`.
+   You may open a cited source to read the paragraph around the line, nothing else.
+4. If the output finds nothing, say so in one sentence. Do not invent a reason and do not infer it from the code.
