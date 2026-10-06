@@ -1,213 +1,211 @@
-// Lecture et écriture des ADR de ProjectMind : docs/decisions/ADR-NNN-<slug>.md, au format
-// compatible MADR (ADR-003). Sans dépendance. L'en-tête est un sous-ensemble de YAML (voir
-// analyserEnTete) : le script écrit toujours les textes entre guillemets, un humain peut les retirer.
+// Reading and writing ProjectMind ADRs: docs/decisions/ADR-NNN-<slug>.md, in a MADR-compatible
+// format (ADR-003). No dependencies. The front matter is a subset of YAML (see parseFrontMatter):
+// the script always quotes strings; a human may remove the quotes.
 
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const DOSSIER_DECISIONS = 'docs/decisions';
-const MOTIF_NOM = /^ADR-(\d+)-.+\.md$/i;
-const CHAMPS_TEXTE = ['titre', 'raison', 'contexte', 'options', 'decision', 'consequences'];
-const CHAMPS_LISTE = ['fichiers_proteges', 'alternatives_rejetees'];
-const OBLIGATOIRES = ['titre', 'raison', 'contexte', 'decision'];
-// Sur disque et en entrée, les champs portent leur nom anglais (ADR-003). Le code garde ses noms
-// français jusqu'à sa traduction, et les noms français des ADR d'avant la v2 restent lus.
-const NOM_ANGLAIS = {
-  titre: 'title', statut: 'status', raison: 'reason', contexte: 'context', options: 'options', decision: 'decision',
-  consequences: 'consequences', fichiers_proteges: 'protected_files', alternatives_rejetees: 'rejected_alternatives',
+export const DECISIONS_DIR = 'docs/decisions';
+const FILE_NAME = /^ADR-(\d+)-.+\.md$/i;
+const TEXT_FIELDS = ['title', 'reason', 'context', 'options', 'decision', 'consequences'];
+const LIST_FIELDS = ['protected_files', 'rejected_alternatives'];
+const REQUIRED = ['title', 'reason', 'context', 'decision'];
+// Keys used before v2: ADRs written with them are still read, and create() still accepts them (ADR-003).
+const LEGACY_KEYS = {
+  titre: 'title', statut: 'status', raison: 'reason', contexte: 'context',
+  fichiers_proteges: 'protected_files', alternatives_rejetees: 'rejected_alternatives',
 };
-const VERS_INTERNE = Object.fromEntries(Object.entries(NOM_ANGLAIS).map(([interne, anglais]) => [anglais, interne]));
-const interne = (cle) => (Object.hasOwn(VERS_INTERNE, cle) ? VERS_INTERNE[cle] : cle);
+const canonical = (key) => (Object.hasOwn(LEGACY_KEYS, key) ? LEGACY_KEYS[key] : key);
 
-export class ErreurAdr extends Error {
-  constructor(erreurs) {
-    super(erreurs.join('\n'));
-    this.erreurs = erreurs;
+export class AdrError extends Error {
+  constructor(errors) {
+    super(errors.join('\n'));
+    this.errors = errors;
   }
 }
 
-export function slugifier(titre, max = 60) {
-  const base = titre
+export function slugify(title, max = 60) {
+  const base = title
     .toLowerCase()
     .replace(/œ/g, 'oe').replace(/æ/g, 'ae').replace(/ß/g, 'ss')
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   if (base.length <= max) return base || 'decision';
-  // Coupe au dernier tiret avant la limite pour ne pas tronquer un mot.
-  const coupe = base.slice(0, max + 1);
-  const tiret = coupe.lastIndexOf('-');
-  return tiret > 0 ? coupe.slice(0, tiret) : base.slice(0, max);
+  // Cut at the last hyphen before the limit, so that no word is truncated.
+  const cut = base.slice(0, max + 1);
+  const hyphen = cut.lastIndexOf('-');
+  return hyphen > 0 ? cut.slice(0, hyphen) : base.slice(0, max);
 }
 
-export function numeroDe(nom) {
-  const m = MOTIF_NOM.exec(nom);
+export function numberOf(name) {
+  const m = FILE_NAME.exec(name);
   return m ? Number(m[1]) : null;
 }
 
-// Le suivant du plus grand numéro : un trou dans la suite n'est jamais réutilisé.
-export function prochainNumero(noms) {
+// One more than the highest number: a gap in the sequence is never reused.
+export function nextNumber(names) {
   let max = 0;
-  for (const nom of noms) {
-    const n = numeroDe(nom);
+  for (const name of names) {
+    const n = numberOf(name);
     if (n !== null && n > max) max = n;
   }
   return max + 1;
 }
 
-export function formaterId(n) {
+export function formatId(n) {
   return `ADR-${String(n).padStart(3, '0')}`;
 }
 
-export function dateDuJour(d = new Date()) {
+export function today(d = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-// Chemin relatif à la racine du projet, séparateur « / », sans « ./ » en tête.
-export function normaliserChemin(chemin) {
-  return chemin.trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '');
+// Path relative to the project root, with "/" separators and no leading "./".
+export function normalizePath(p) {
+  return p.trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '');
 }
 
-function preparer(entree) {
-  if (entree === null || typeof entree !== 'object' || Array.isArray(entree)) {
-    return { erreurs: ["l'entrée doit être un objet JSON"] };
+function prepare(input) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    return { errors: ['input must be a JSON object'] };
   }
-  const erreurs = [];
+  const errors = [];
   const adr = {};
-  const valeurs = {};
-  for (const cle of Object.keys(entree)) {
-    const champ = interne(cle);
-    if (!CHAMPS_TEXTE.includes(champ) && !CHAMPS_LISTE.includes(champ)) erreurs.push(`clé inconnue : « ${cle} »`);
-    else if (Object.hasOwn(valeurs, champ)) erreurs.push(`« ${NOM_ANGLAIS[champ]} » donné deux fois, en anglais et en français`);
-    else valeurs[champ] = entree[cle];
+  const values = {};
+  for (const key of Object.keys(input)) {
+    const field = canonical(key);
+    if (!TEXT_FIELDS.includes(field) && !LIST_FIELDS.includes(field)) errors.push(`unknown key: "${key}"`);
+    else if (Object.hasOwn(values, field)) errors.push(`"${field}" given twice, in English and in French`);
+    else values[field] = input[key];
   }
-  for (const cle of CHAMPS_TEXTE) {
-    const v = valeurs[cle] ?? '';
-    if (typeof v !== 'string') erreurs.push(`« ${NOM_ANGLAIS[cle]} » doit être un texte`);
-    adr[cle] = typeof v === 'string' ? v.trim() : '';
-    if (OBLIGATOIRES.includes(cle) && !adr[cle] && typeof v === 'string') erreurs.push(`« ${NOM_ANGLAIS[cle]} » est obligatoire`);
+  for (const field of TEXT_FIELDS) {
+    const v = values[field] ?? '';
+    if (typeof v !== 'string') errors.push(`"${field}" must be a string`);
+    adr[field] = typeof v === 'string' ? v.trim() : '';
+    if (REQUIRED.includes(field) && !adr[field] && typeof v === 'string') errors.push(`"${field}" is required`);
   }
-  if (/[\r\n]/.test(adr.titre)) erreurs.push('« title » doit tenir sur une ligne');
-  for (const cle of CHAMPS_LISTE) {
-    const v = valeurs[cle] ?? [];
+  if (/[\r\n]/.test(adr.title)) errors.push('"title" must fit on one line');
+  for (const field of LIST_FIELDS) {
+    const v = values[field] ?? [];
     if (!Array.isArray(v) || v.some((x) => typeof x !== 'string' || !x.trim())) {
-      erreurs.push(`« ${NOM_ANGLAIS[cle]} » doit être une liste de textes non vides`);
-      adr[cle] = [];
+      errors.push(`"${field}" must be a list of non-empty strings`);
+      adr[field] = [];
     } else {
-      adr[cle] = v.map((x) => x.trim());
+      adr[field] = v.map((x) => x.trim());
     }
   }
-  adr.fichiers_proteges = [...new Set(adr.fichiers_proteges.map(normaliserChemin))];
-  for (const f of adr.fichiers_proteges) {
+  adr.protected_files = [...new Set(adr.protected_files.map(normalizePath))];
+  for (const f of adr.protected_files) {
     if (path.posix.isAbsolute(f) || /^[A-Za-z]:/.test(f) || f.split('/').includes('..')) {
-      erreurs.push(`chemin hors du projet : « ${f} » (donne un chemin relatif à la racine)`);
+      errors.push(`path outside the project: "${f}" (give a path relative to the project root)`);
     }
   }
-  return { adr, erreurs };
+  return { adr, errors };
 }
 
-// En-tête et sections de MADR 4 ; id, title, protected_files, reason et rejected_alternatives sont
-// propres à ProjectMind. Les sections facultatives vides sont omises, comme le prévoit MADR.
-export function serialiser(id, adr, date) {
+// MADR 4 front matter and sections; id, title, protected_files, reason and rejected_alternatives
+// are ProjectMind's own. Empty optional sections are left out, as MADR allows.
+export function serialize(id, adr, date) {
   const q = (s) => JSON.stringify(s);
-  const liste = (cle, valeurs) => (valeurs.length ? [`${cle}:`, ...valeurs.map((v) => `  - ${q(v)}`)] : [`${cle}: []`]);
-  const section = (titre, texte) => (texte ? [titre, '', texte, ''] : []);
+  const list = (key, values) => (values.length ? [`${key}:`, ...values.map((v) => `  - ${q(v)}`)] : [`${key}: []`]);
+  const section = (heading, text) => (text ? [heading, '', text, ''] : []);
   return [
     '---',
     `id: ${id}`,
-    `title: ${q(adr.titre)}`,
+    `title: ${q(adr.title)}`,
     'status: accepted',
     `date: ${date}`,
-    ...liste('protected_files', adr.fichiers_proteges),
-    `reason: ${q(adr.raison)}`,
-    ...liste('rejected_alternatives', adr.alternatives_rejetees),
+    ...list('protected_files', adr.protected_files),
+    `reason: ${q(adr.reason)}`,
+    ...list('rejected_alternatives', adr.rejected_alternatives),
     '---',
     '',
-    `# ${id} — ${adr.titre}`,
+    `# ${id} — ${adr.title}`,
     '',
-    ...section('## Context and Problem Statement', adr.contexte),
+    ...section('## Context and Problem Statement', adr.context),
     ...section('## Considered Options', adr.options),
     ...section('## Decision Outcome', adr.decision),
     ...section('### Consequences', adr.consequences),
   ].join('\n');
 }
 
-// Calcule le numéro, écrit le fichier (sauf en essai) et rend { id, chemin, contenu }.
-export function creer(racine, entree, { essai = false, date = dateDuJour() } = {}) {
-  const { adr, erreurs } = preparer(entree);
-  if (erreurs.length) throw new ErreurAdr(erreurs);
-  const dossier = path.join(racine, DOSSIER_DECISIONS);
-  const noms = fs.existsSync(dossier) ? fs.readdirSync(dossier) : [];
-  const id = formaterId(prochainNumero(noms));
-  const nom = `${id}-${slugifier(adr.titre)}.md`;
-  const contenu = serialiser(id, adr, date);
-  if (!essai) {
-    fs.mkdirSync(dossier, { recursive: true });
+// Computes the number, writes the file (unless dryRun) and returns { id, file, content }.
+export function create(root, input, { dryRun = false, date = today() } = {}) {
+  const { adr, errors } = prepare(input);
+  if (errors.length) throw new AdrError(errors);
+  const dir = path.join(root, DECISIONS_DIR);
+  const names = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  const id = formatId(nextNumber(names));
+  const name = `${id}-${slugify(adr.title)}.md`;
+  const content = serialize(id, adr, date);
+  if (!dryRun) {
+    fs.mkdirSync(dir, { recursive: true });
     try {
-      fs.writeFileSync(path.join(dossier, nom), contenu, { flag: 'wx' });
+      fs.writeFileSync(path.join(dir, name), content, { flag: 'wx' });
     } catch (e) {
-      if (e.code === 'EEXIST') throw new ErreurAdr([`le fichier existe déjà : ${DOSSIER_DECISIONS}/${nom}`]);
+      if (e.code === 'EEXIST') throw new AdrError([`file already exists: ${DECISIONS_DIR}/${name}`]);
       throw e;
     }
   }
-  return { id, chemin: `${DOSSIER_DECISIONS}/${nom}`, contenu };
+  return { id, file: `${DECISIONS_DIR}/${name}`, content };
 }
 
-// Sous-ensemble de YAML lu dans l'en-tête :
-//   cle: valeur            texte nu, "entre guillemets" ou 'entre apostrophes'
-//   cle: suite             un texte nu peut continuer sur les lignes indentées suivantes
-//   cle: [a, "b"]          liste sur une ligne
-//   cle:                   liste en tirets, indentée ou non
+// Subset of YAML read in the front matter:
+//   key: value             bare text, "double-quoted" or 'single-quoted'
+//   key: more              bare text may go on over the following indented lines
+//   key: [a, "b"]          one-line list
+//   key:                   dash list, indented or not
 //     - a
-//   cle: >   ou   cle: |   bloc plié ou littéral
-//   # commentaire
-// Rend { donnees, erreurs } ; donnees vaut null s'il n'y a pas d'en-tête.
-export function analyserEnTete(texte) {
-  const lignes = texte.replace(/^﻿/, '').split(/\r?\n/);
-  if (lignes[0].trim() !== '---') return { donnees: null, erreurs: ["pas d'en-tête : la première ligne doit être ---"] };
-  const fin = lignes.findIndex((l, k) => k > 0 && l.trim() === '---');
-  if (fin < 0) return { donnees: null, erreurs: ["en-tête non fermé : il manque la ligne --- de fin"] };
+//   key: >   or   key: |   folded or literal block
+//   # comment
+// Returns { data, errors }; data is null when there is no front matter.
+export function parseFrontMatter(text) {
+  const lines = text.replace(/^﻿/, '').split(/\r?\n/);
+  if (lines[0].trim() !== '---') return { data: null, errors: ['no front matter: the first line must be ---'] };
+  const end = lines.findIndex((l, k) => k > 0 && l.trim() === '---');
+  if (end < 0) return { data: null, errors: ['front matter not closed: the closing --- line is missing'] };
 
-  const donnees = {};
-  const erreurs = [];
+  const data = {};
+  const errors = [];
   let i = 1;
-  while (i < fin) {
-    if (estIgnorable(lignes[i])) { i++; continue; }
-    const m = /^([A-Za-z_][\w-]*)\s*:(?:\s+(.*?))?\s*$/.exec(lignes[i]);
+  while (i < end) {
+    if (isBlank(lines[i])) { i++; continue; }
+    const m = /^([A-Za-z_][\w-]*)\s*:(?:\s+(.*?))?\s*$/.exec(lines[i]);
     if (!m) {
-      erreurs.push(`ligne ${i + 1} illisible : ${lignes[i].trim()}`);
+      errors.push(`line ${i + 1} unreadable: ${lines[i].trim()}`);
       i++;
       continue;
     }
-    const [, cle, valeur = ''] = m;
+    const [, key, value = ''] = m;
     i++;
-    const suite = [];
-    while (i < fin && (/^\s/.test(lignes[i]) || lignes[i] === '' || (valeur === '' && /^-(\s|$)/.test(lignes[i])))) {
-      suite.push(lignes[i]);
+    const rest = [];
+    while (i < end && (/^\s/.test(lines[i]) || lines[i] === '' || (value === '' && /^-(\s|$)/.test(lines[i])))) {
+      rest.push(lines[i]);
       i++;
     }
-    const utiles = suite.filter((l) => !estIgnorable(l));
-    if (/^[|>][+-]?$/.test(valeur)) {
-      donnees[cle] = lireBloc(valeur[0], suite);
-    } else if (valeur === '') {
-      donnees[cle] = utiles.length && /^-(\s|$)/.test(utiles[0].trim())
-        ? lireListe(utiles)
-        : lireScalaire(utiles.map((l) => l.trim()).join(' '));
+    const useful = rest.filter((l) => !isBlank(l));
+    if (/^[|>][+-]?$/.test(value)) {
+      data[key] = readBlock(value[0], rest);
+    } else if (value === '') {
+      data[key] = useful.length && /^-(\s|$)/.test(useful[0].trim())
+        ? readList(useful)
+        : readScalar(useful.map((l) => l.trim()).join(' '));
     } else {
-      const brut = [valeur, ...utiles.map((l) => l.trim())].join(' ');
-      donnees[cle] = brut.startsWith('[') ? lireListeEnLigne(brut, erreurs, cle) : lireScalaire(brut);
+      const raw = [value, ...useful.map((l) => l.trim())].join(' ');
+      data[key] = raw.startsWith('[') ? readInlineList(raw, errors, key) : readScalar(raw);
     }
   }
-  return { donnees, erreurs };
+  return { data, errors };
 }
 
-function estIgnorable(ligne) {
-  return /^\s*(#.*)?$/.test(ligne);
+function isBlank(line) {
+  return /^\s*(#.*)?$/.test(line);
 }
 
-function lireScalaire(brut) {
-  const s = brut.trim();
+function readScalar(raw) {
+  const s = raw.trim();
   if (s.startsWith('"')) {
     let k = 1;
     while (k < s.length && s[k] !== '"') k += s[k] === '\\' ? 2 : 1;
@@ -218,102 +216,105 @@ function lireScalaire(brut) {
     }
   }
   if (s.startsWith("'")) {
-    let sortie = '';
+    let out = '';
     for (let k = 1; k < s.length; k++) {
-      if (s[k] !== "'") sortie += s[k];
-      else if (s[k + 1] === "'") { sortie += "'"; k++; }
+      if (s[k] !== "'") out += s[k];
+      else if (s[k + 1] === "'") { out += "'"; k++; }
       else break;
     }
-    return sortie;
+    return out;
   }
   return s.replace(/\s+#.*$/, '');
 }
 
-function lireListe(lignes) {
-  const elements = [];
-  for (const l of lignes) {
+function readList(lines) {
+  const items = [];
+  for (const l of lines) {
     const t = l.trim();
-    if (/^-(\s|$)/.test(t)) elements.push(t.slice(1).trim());
-    else elements[elements.length - 1] += ` ${t}`;
+    if (/^-(\s|$)/.test(t)) items.push(t.slice(1).trim());
+    else items[items.length - 1] += ` ${t}`;
   }
-  return elements.map(lireScalaire);
+  return items.map(readScalar);
 }
 
-function lireListeEnLigne(brut, erreurs, cle) {
-  const elements = [];
-  let courant = '';
-  let guillemet = null;
+function readInlineList(raw, errors, key) {
+  const items = [];
+  let current = '';
+  let quote = null;
   let k = 1;
-  for (; k < brut.length; k++) {
-    const c = brut[k];
-    if (guillemet) {
-      courant += c;
-      if (c === '\\' && guillemet === '"') courant += brut[++k] ?? '';
-      else if (c === guillemet) guillemet = null;
+  for (; k < raw.length; k++) {
+    const c = raw[k];
+    if (quote) {
+      current += c;
+      if (c === '\\' && quote === '"') current += raw[++k] ?? '';
+      else if (c === quote) quote = null;
     } else if (c === '"' || c === "'") {
-      guillemet = c;
-      courant += c;
+      quote = c;
+      current += c;
     } else if (c === ',') {
-      elements.push(courant);
-      courant = '';
+      items.push(current);
+      current = '';
     } else if (c === ']') {
       break;
     } else {
-      courant += c;
+      current += c;
     }
   }
-  if (k >= brut.length) erreurs.push(`« ${cle} » : liste non fermée`);
-  elements.push(courant);
-  return elements.map((e) => e.trim()).filter((e) => e !== '').map(lireScalaire);
+  if (k >= raw.length) errors.push(`"${key}": list not closed`);
+  items.push(current);
+  return items.map((e) => e.trim()).filter((e) => e !== '').map(readScalar);
 }
 
-function lireBloc(type, suite) {
-  const lignes = [...suite];
-  while (lignes.length && !lignes[lignes.length - 1].trim()) lignes.pop();
-  const retrait = Math.min(...lignes.filter((l) => l.trim()).map((l) => /^\s*/.exec(l)[0].length));
-  const texte = lignes.map((l) => l.slice(retrait));
-  if (type === '|') return texte.join('\n');
-  return texte.join('\n').split(/\n\s*\n/).map((p) => p.split('\n').map((l) => l.trim()).join(' ')).join('\n');
+function readBlock(type, rest) {
+  const lines = [...rest];
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  const indent = Math.min(...lines.filter((l) => l.trim()).map((l) => /^\s*/.exec(l)[0].length));
+  const text = lines.map((l) => l.slice(indent));
+  if (type === '|') return text.join('\n');
+  return text.join('\n').split(/\n\s*\n/).map((p) => p.split('\n').map((l) => l.trim()).join(' ')).join('\n');
 }
 
-// Noms anglais de l'en-tête → noms internes ; les noms français d'avant la v2 passent tels quels.
-// nomLu garde la clé écrite dans le fichier, pour que les messages la citent telle quelle.
-function versInterne(donnees, erreurs) {
-  const d = { ...donnees };
-  const nomLu = {};
-  for (const [champ, anglais] of Object.entries(NOM_ANGLAIS)) {
-    if (Object.hasOwn(d, champ)) nomLu[champ] = champ;
-    if (anglais === champ || !Object.hasOwn(d, anglais)) continue;
-    if (Object.hasOwn(d, champ)) erreurs.push(`« ${anglais} » et « ${champ} » désignent le même champ : « ${anglais} » est retenu`);
-    d[champ] = d[anglais];
-    delete d[anglais];
-    nomLu[champ] = anglais;
+// Pre-v2 front matter keys → current keys. keyRead keeps each key as written in the file,
+// so that messages quote it as is.
+function fromLegacy(data, errors) {
+  const d = { ...data };
+  const keyRead = {};
+  for (const key of Object.keys(d)) keyRead[key] = key;
+  for (const [legacy, field] of Object.entries(LEGACY_KEYS)) {
+    if (!Object.hasOwn(d, legacy)) continue;
+    if (Object.hasOwn(d, field)) {
+      errors.push(`"${field}" and "${legacy}" are the same field: "${field}" is kept`);
+    } else {
+      d[field] = d[legacy];
+      keyRead[field] = legacy;
+    }
+    delete d[legacy];
   }
-  return { d, nomLu };
+  return { d, keyRead };
 }
 
-// Lit tous les ADR du projet, triés par numéro. Une anomalie est signalée dans
-// « erreurs » sans faire disparaître la décision : mieux vaut protéger en trop.
-export function lireDecisions(racine) {
-  const dossier = path.join(racine, DOSSIER_DECISIONS);
-  if (!fs.existsSync(dossier)) return [];
-  return fs.readdirSync(dossier)
-    .filter((nom) => MOTIF_NOM.test(nom))
-    .sort((a, b) => numeroDe(a) - numeroDe(b))
-    .map((nom) => {
-      const { donnees, erreurs } = analyserEnTete(fs.readFileSync(path.join(dossier, nom), 'utf8'));
-      const { d, nomLu } = versInterne(donnees ?? {}, erreurs);
-      for (const cle of CHAMPS_LISTE) {
-        if (d[cle] === undefined || d[cle] === '') d[cle] = [];
-        else if (!Array.isArray(d[cle])) {
-          erreurs.push(`« ${nomLu[cle]} » devrait être une liste`);
-          d[cle] = [d[cle]];
+// Reads all project ADRs, sorted by number. An anomaly is reported in "errors" without
+// dropping the decision: better to protect too much.
+export function readDecisions(root) {
+  const dir = path.join(root, DECISIONS_DIR);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((name) => FILE_NAME.test(name))
+    .sort((a, b) => numberOf(a) - numberOf(b))
+    .map((name) => {
+      const { data, errors } = parseFrontMatter(fs.readFileSync(path.join(dir, name), 'utf8'));
+      const { d, keyRead } = fromLegacy(data ?? {}, errors);
+      for (const field of LIST_FIELDS) {
+        if (d[field] === undefined || d[field] === '') d[field] = [];
+        else if (!Array.isArray(d[field])) {
+          errors.push(`"${keyRead[field]}" should be a list`);
+          d[field] = [d[field]];
         }
       }
-      d.fichiers_proteges = d.fichiers_proteges.map(normaliserChemin);
-      if (donnees && !d.raison) erreurs.push(`« ${nomLu.raison ?? 'reason'} » manquante`);
-      const attendu = formaterId(numeroDe(nom));
-      if (donnees && d.id !== attendu) erreurs.push(`« id » vaut ${d.id ?? '(rien)'} mais le nom du fichier donne ${attendu}`);
-      return { fichier: `${DOSSIER_DECISIONS}/${nom}`, ...d, erreurs };
+      d.protected_files = d.protected_files.map(normalizePath);
+      if (data && !d.reason) errors.push(`"${keyRead.reason ?? 'reason'}" is missing`);
+      const expected = formatId(numberOf(name));
+      if (data && d.id !== expected) errors.push(`"id" is ${d.id ?? '(none)'} but the file name gives ${expected}`);
+      return { file: `${DECISIONS_DIR}/${name}`, ...d, errors };
     });
 }

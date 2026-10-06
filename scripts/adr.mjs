@@ -1,50 +1,50 @@
 #!/usr/bin/env node
-// Outil en ligne de commande des ADR, appelé par le skill /projectmind:remember.
-//   node adr.mjs lister [--racine <dossier>]
-//   node adr.mjs creer [--essai] [--racine <dossier>]    l'ADR arrive en JSON sur stdin
+// Command-line tool for ADRs, called by the /projectmind:remember skill.
+//   node adr.mjs list [--root <dir>]
+//   node adr.mjs create [--dry-run] [--root <dir>]    the ADR comes as JSON on stdin
 
 import fs from 'node:fs';
-import { creer, lireDecisions, ErreurAdr } from './lib/adr.mjs';
+import { create, readDecisions, AdrError } from './lib/adr.mjs';
 
-const USAGE = `Usage :
-  node adr.mjs lister [--racine <dossier>]
-  node adr.mjs creer [--essai] [--racine <dossier>]   (objet JSON sur stdin)`;
+const USAGE = `Usage:
+  node adr.mjs list [--root <dir>]
+  node adr.mjs create [--dry-run] [--root <dir>]   (JSON object on stdin)`;
 
-function lireOptions(args) {
-  const options = { racine: process.cwd(), essai: false };
+function readOptions(args) {
+  const options = { root: process.cwd(), dryRun: false };
   for (let k = 0; k < args.length; k++) {
-    if (args[k] === '--essai') options.essai = true;
-    else if (args[k] === '--racine' && args[k + 1]) options.racine = args[++k];
-    else throw new ErreurAdr([`option inconnue : ${args[k]}`]);
+    if (args[k] === '--dry-run') options.dryRun = true;
+    else if (args[k] === '--root' && args[k + 1]) options.root = args[++k];
+    else throw new AdrError([`unknown option: ${args[k]}`]);
   }
-  if (!fs.existsSync(options.racine) || !fs.statSync(options.racine).isDirectory()) {
-    throw new ErreurAdr([`dossier du projet introuvable : ${options.racine}`]);
+  if (!fs.existsSync(options.root) || !fs.statSync(options.root).isDirectory()) {
+    throw new AdrError([`project folder not found: ${options.root}`]);
   }
   return options;
 }
 
 try {
-  const [commande, ...args] = process.argv.slice(2);
-  if (commande === 'lister') {
-    const { racine } = lireOptions(args);
-    console.log(JSON.stringify(lireDecisions(racine), null, 2));
-  } else if (commande === 'creer') {
-    const { racine, essai } = lireOptions(args);
-    let entree;
+  const [command, ...args] = process.argv.slice(2);
+  if (command === 'list') {
+    const { root } = readOptions(args);
+    console.log(JSON.stringify(readDecisions(root), null, 2));
+  } else if (command === 'create') {
+    const { root, dryRun } = readOptions(args);
+    let input;
     try {
-      entree = JSON.parse(fs.readFileSync(0, 'utf8').replace(/^﻿/, ''));
+      input = JSON.parse(fs.readFileSync(0, 'utf8').replace(/^﻿/, ''));
     } catch (e) {
-      throw new ErreurAdr([`JSON illisible sur stdin : ${e.message}`]);
+      throw new AdrError([`invalid JSON on stdin: ${e.message}`]);
     }
-    const { chemin, contenu } = creer(racine, entree, { essai });
-    if (essai) process.stdout.write(`Aperçu, rien n'est écrit : ${chemin}\n\n${contenu}`);
-    else console.log(`ADR créé : ${chemin}`);
+    const { file, content } = create(root, input, { dryRun });
+    if (dryRun) process.stdout.write(`Preview, nothing written: ${file}\n\n${content}`);
+    else console.log(`ADR created: ${file}`);
   } else {
     console.error(USAGE);
     process.exitCode = 2;
   }
 } catch (e) {
-  if (!(e instanceof ErreurAdr)) throw e;
-  console.error(`Erreur :\n- ${e.erreurs.join('\n- ')}`);
+  if (!(e instanceof AdrError)) throw e;
+  console.error(`Error:\n- ${e.errors.join('\n- ')}`);
   process.exitCode = 1;
 }

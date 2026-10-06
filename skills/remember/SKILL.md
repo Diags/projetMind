@@ -4,8 +4,8 @@ description: Enregistre une décision du projet dans docs/decisions/ sous forme 
 argument-hint: "[décision à enregistrer]"
 disable-model-invocation: true
 allowed-tools:
-  - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" lister *)
-  - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" creer --essai *)
+  - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" list *)
+  - Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" create --dry-run *)
 ---
 
 # Enregistrer une décision
@@ -21,7 +21,7 @@ Si aucune décision n'est donnée ci-dessus, demande laquelle enregistrer et arr
 ## 1. Vérifier l'existant
 
 - Lis les ADR déjà enregistrés :
-  `node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" lister --racine "${CLAUDE_PROJECT_DIR}"`
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" list --root "${CLAUDE_PROJECT_DIR}"`
   Si l'un traite déjà du sujet, cite-le et demande s'il faut un nouvel ADR.
 - Si le projet tient déjà un registre de décisions ailleurs (invariants, cicatrices, dette… cité dans
   `CLAUDE.md` ou le `README`), signale-le : la décision y figure peut-être déjà. Pas de doublon sans accord.
@@ -44,7 +44,7 @@ Si aucune décision n'est donnée ci-dessus, demande laquelle enregistrer et arr
 L'aperçu n'écrit rien :
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" creer --essai --racine "${CLAUDE_PROJECT_DIR}" <<'JSON'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/adr.mjs" create --dry-run --root "${CLAUDE_PROJECT_DIR}" <<'JSON'
 { "title": "…", "reason": "…", "protected_files": ["…"], "rejected_alternatives": ["…"], "context": "…", "options": "…", "decision": "…", "consequences": "…" }
 JSON
 ```
@@ -54,5 +54,5 @@ Si l'utilisateur corrige un point, refais l'aperçu avant de redemander.
 
 ## 4. Écrire, après accord seulement
 
-Relance la même commande, avec le même JSON, sans `--essai`.
+Relance la même commande, avec le même JSON, sans `--dry-run`.
 Donne le chemin du fichier créé. Ne fais ni commit ni push.

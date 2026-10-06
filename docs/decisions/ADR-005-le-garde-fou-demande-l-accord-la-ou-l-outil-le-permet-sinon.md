@@ -4,8 +4,8 @@ titre: "Le garde-fou demande l'accord là où l'outil le permet, sinon il refuse
 statut: acceptée
 date: 2026-10-05
 fichiers_proteges:
-  - "hooks/garde-fou.mjs"
-  - "scripts/lib/garde-fou.mjs"
+  - "hooks/guard.mjs"
+  - "scripts/lib/guard.mjs"
 raison: "Seuls Claude Code, Copilot CLI et VS Code appliquent une demande d'accord avant écriture ; Codex et Cursor l'ignorent, et la modification passerait alors en silence."
 alternatives_rejetees:
   - "Renvoyer une demande d'accord partout : sous Codex et Cursor, la modification passe sans rien dire."

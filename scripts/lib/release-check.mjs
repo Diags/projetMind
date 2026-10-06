@@ -1,256 +1,261 @@
-// /projectmind:release-check : rapport ✓/⚠/✗ d'une branche avant livraison.
-// Lance la commande de contrôle du projet, regarde les ADR que la branche touche et cherche
-// les secrets dans ce qu'elle ajoute. Ne corrige rien, ne fait aucun fetch, n'affiche
-// jamais la valeur d'un secret : seulement son fichier, sa ligne et son type.
+// /projectmind:release-check: ✓/⚠/✗ report on a branch before release.
+// Runs the project's check command, looks at the ADRs the branch touches and searches for
+// secrets in what it adds. Fixes nothing, never fetches, never shows a secret's value:
+// only its file, line and type.
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ErreurAdr, lireDecisions, numeroDe } from './adr.mjs';
-import { MOTIF_ADR, correspond, estActif } from './garde-fou.mjs';
+import { AdrError, readDecisions, numberOf } from './adr.mjs';
+import { ADR_PATTERN, matches, isActive } from './guard.mjs';
 
-// Réglage versionné avec le projet. L'ancien emplacement reste lu pour les projets réglés avant la v2 (ADR-004).
-export const CONFIG = '.projectmind.json';
-export const CONFIG_ANCIENNE = '.claude/projectmind.json';
-const CLES_CONFIG = ['controle', 'base'];
+// Setting committed with the project. The old location is still read for projects set up before v2 (ADR-004).
+export const CONFIG_FILE = '.projectmind.json';
+export const LEGACY_CONFIG_FILE = '.claude/projectmind.json';
+const CONFIG_KEYS = ['check', 'base'];
+// Key name used before v2, still read.
+const LEGACY_CONFIG_KEYS = { controle: 'check' };
 export const OK = '✓';
-export const ATTENTION = '⚠';
-export const ECHEC = '✗';
-const VERDICTS = { [OK]: 'Prêt', [ATTENTION]: 'Prêt avec réserves', [ECHEC]: 'Non prêt' };
+export const WARN = '⚠';
+export const FAIL = '✗';
+const VERDICTS = { [OK]: 'Ready', [WARN]: 'Ready with reservations', [FAIL]: 'Not ready' };
 
-// Motifs de repli quand gitleaks est absent : peu nombreux et ciblés sur des formats précis.
-const MOTIFS_SECRETS = [
-  ['clé privée', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
-  ['clé AWS', /\b(?:AKIA|ASIA)[A-Z2-7]{16}\b/],
-  ['jeton GitHub', /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})/],
-  ['jeton Slack', /\bxox[abprs]-[A-Za-z0-9-]{10,}/],
-  ["clé d'API sk-", /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}/],
-  ['clé Google', /\bAIza[0-9A-Za-z_-]{35}/],
+// Fallback patterns when gitleaks is missing: few, and aimed at precise formats.
+const SECRET_PATTERNS = [
+  ['private key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
+  ['AWS key', /\b(?:AKIA|ASIA)[A-Z2-7]{16}\b/],
+  ['GitHub token', /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})/],
+  ['Slack token', /\bxox[abprs]-[A-Za-z0-9-]{10,}/],
+  ['sk- API key', /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}/],
+  ['Google key', /\bAIza[0-9A-Za-z_-]{35}/],
   ['JWT', /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/],
 ];
-// Fichiers qui ne devraient jamais être versionnés ; les modèles (.env.example…) sont admis.
-const FICHIER_SENSIBLE = /(^|\/)(\.env(\.(?!(example|sample|template|dist)$)[^/]+)?|id_rsa|id_ecdsa|id_ed25519|[^/]+\.(pem|key|p12|pfx|jks))$/i;
+// Files that should never be committed; templates (.env.example…) are allowed.
+const SENSITIVE_FILE = /(^|\/)(\.env(\.(?!(example|sample|template|dist)$)[^/]+)?|id_rsa|id_ecdsa|id_ed25519|[^/]+\.(pem|key|p12|pfx|jks))$/i;
 
-function git(racine, args) {
-  const r = spawnSync('git', ['-c', 'core.quotepath=false', ...args], { cwd: racine, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-  if (r.error || r.status !== 0) throw new ErreurAdr([`git ${args.join(' ')} : ${(r.stderr || r.error?.message || '').trim()}`]);
+function git(root, args) {
+  const r = spawnSync('git', ['-c', 'core.quotepath=false', ...args], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  if (r.error || r.status !== 0) throw new AdrError([`git ${args.join(' ')}: ${(r.stderr || r.error?.message || '').trim()}`]);
   return r.stdout;
 }
 
-const existe = (racine, ref) => spawnSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: racine }).status === 0;
+const exists = (root, ref) => spawnSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: root }).status === 0;
 
-function baseParDefaut(racine) {
-  const r = spawnSync('git', ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], { cwd: racine, encoding: 'utf8' });
-  return [r.status === 0 ? r.stdout.trim() : null, 'main', 'master'].filter(Boolean).find((ref) => existe(racine, ref)) ?? null;
+function defaultBase(root) {
+  const r = spawnSync('git', ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], { cwd: root, encoding: 'utf8' });
+  return [r.status === 0 ? r.stdout.trim() : null, 'main', 'master'].filter(Boolean).find((ref) => exists(root, ref)) ?? null;
 }
 
-// Rend { config, erreurs, fichier } ; fichier vaut null si le projet n'a aucun réglage.
-export function lireConfig(racine) {
-  const presents = [CONFIG, CONFIG_ANCIENNE].filter((f) => fs.existsSync(path.join(racine, f)));
-  if (!presents.length) return { config: {}, erreurs: [], fichier: null };
-  const [fichier] = presents;
-  const chemin = path.join(racine, fichier);
-  const erreurs = presents.length > 1 ? [`${CONFIG_ANCIENNE} ignoré : ${CONFIG} est prioritaire`] : [];
-  let config;
+// Returns { config, errors, file }; file is null when the project has no setting.
+export function readConfig(root) {
+  const present = [CONFIG_FILE, LEGACY_CONFIG_FILE].filter((f) => fs.existsSync(path.join(root, f)));
+  if (!present.length) return { config: {}, errors: [], file: null };
+  const [file] = present;
+  const errors = present.length > 1 ? [`${LEGACY_CONFIG_FILE} ignored: ${CONFIG_FILE} takes precedence`] : [];
+  let raw;
   try {
-    config = JSON.parse(fs.readFileSync(chemin, 'utf8').replace(/^﻿/, ''));
+    raw = JSON.parse(fs.readFileSync(path.join(root, file), 'utf8').replace(/^﻿/, ''));
   } catch (e) {
-    return { config: {}, erreurs: [...erreurs, `${fichier} illisible : ${e.message}`], fichier };
+    return { config: {}, errors: [...errors, `${file} unreadable: ${e.message}`], file };
   }
-  if (!config || typeof config !== 'object' || Array.isArray(config)) {
-    return { config: {}, erreurs: [...erreurs, `${fichier} doit contenir un objet JSON`], fichier };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { config: {}, errors: [...errors, `${file} must contain a JSON object`], file };
   }
-  erreurs.push(...Object.keys(config).filter((k) => !CLES_CONFIG.includes(k)).map((k) => `${fichier} : clé inconnue « ${k} »`));
-  for (const k of CLES_CONFIG) {
-    if (config[k] !== undefined && typeof config[k] !== 'string') {
-      erreurs.push(`${fichier} : « ${k} » doit être un texte`);
-      delete config[k];
-    }
+  const config = {};
+  const isLegacy = (key) => Object.hasOwn(LEGACY_CONFIG_KEYS, key);
+  // Current keys first, so that they win over their pre-v2 name.
+  const entries = Object.entries(raw).sort(([a], [b]) => isLegacy(a) - isLegacy(b));
+  for (const [key, value] of entries) {
+    const name = isLegacy(key) ? LEGACY_CONFIG_KEYS[key] : key;
+    if (!CONFIG_KEYS.includes(name)) errors.push(`${file}: unknown key "${key}"`);
+    else if (Object.hasOwn(config, name)) errors.push(`${file}: "${name}" and "${key}" are the same setting: "${name}" is kept`);
+    else if (typeof value !== 'string') errors.push(`${file}: "${key}" must be a string`);
+    else config[name] = value;
   }
-  return { config, erreurs, fichier };
+  return { config, errors, file };
 }
 
-// Fichiers changés entre la base commune et HEAD : [{ statut: A|M|D|T, fichier }].
-function lireChangements(racine, base) {
-  const champs = git(racine, ['diff', '--name-status', '--no-renames', '-z', base, 'HEAD']).split('\0').filter(Boolean);
-  const changements = [];
-  for (let k = 0; k + 1 < champs.length; k += 2) changements.push({ statut: champs[k][0], fichier: champs[k + 1] });
-  return changements;
+// Files changed between the merge base and HEAD: [{ status: A|M|D|T, file }].
+function readChanges(root, base) {
+  const fields = git(root, ['diff', '--name-status', '--no-renames', '-z', base, 'HEAD']).split('\0').filter(Boolean);
+  const changes = [];
+  for (let k = 0; k + 1 < fields.length; k += 2) changes.push({ status: fields[k][0], file: fields[k + 1] });
+  return changes;
 }
 
-function sectionControle(racine, controle, sansControle) {
-  const titre = 'Commande de contrôle';
-  if (sansControle) return { titre, etat: ATTENTION, lignes: ['non lancée (--sans-controle)'] };
-  if (!controle) return { titre, etat: ATTENTION, lignes: [`aucune commande déclarée : ajoute « controle » dans ${CONFIG}`] };
-  const debut = Date.now();
-  const r = spawnSync('bash', ['-c', `{ ${controle}\n} 2>&1`], { cwd: racine, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-  const duree = Math.round((Date.now() - debut) / 1000);
-  if (r.error) return { titre, etat: ECHEC, lignes: [`${controle} : lancement impossible (${r.error.message})`] };
-  const sortie = (r.stdout ?? '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
-  const journal = path.join(os.tmpdir(), `projectmind-controle-${Date.now()}.log`);
-  fs.writeFileSync(journal, sortie);
-  const etat = r.status === 0 ? OK : ECHEC;
-  const fin = sortie.trimEnd().split(/\r?\n/).slice(etat === OK ? -8 : -20);
+function checkSection(root, command, noCheck) {
+  const title = 'Check command';
+  if (noCheck) return { title, state: WARN, lines: ['not run (--no-check)'] };
+  if (!command) return { title, state: WARN, lines: [`no check command declared: add "check" to ${CONFIG_FILE}`] };
+  const start = Date.now();
+  const r = spawnSync('bash', ['-c', `{ ${command}\n} 2>&1`], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  const seconds = Math.round((Date.now() - start) / 1000);
+  if (r.error) return { title, state: FAIL, lines: [`${command}: could not start (${r.error.message})`] };
+  const output = (r.stdout ?? '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  const log = path.join(os.tmpdir(), `projectmind-check-${Date.now()}.log`);
+  fs.writeFileSync(log, output);
+  const state = r.status === 0 ? OK : FAIL;
+  const tail = output.trimEnd().split(/\r?\n/).slice(state === OK ? -8 : -20);
   return {
-    titre,
-    etat,
-    journal,
-    lignes: [`${controle} → code ${r.status ?? r.signal}, ${duree} s`, `journal complet : ${journal}`, ...fin.map((l) => `│ ${l}`)],
+    title,
+    state,
+    log,
+    lines: [`${command} → exit ${r.status ?? r.signal}, ${seconds} s`, `full log: ${log}`, ...tail.map((l) => `│ ${l}`)],
   };
 }
 
-function sectionAdr(racine, changements, suivis) {
-  const adrs = lireDecisions(racine);
-  const actifs = adrs.filter(estActif);
-  const lignes = [];
-  let etat = OK;
-  const attention = (ligne) => {
-    etat = ATTENTION;
-    lignes.push(ligne);
+function adrSection(root, changes, tracked) {
+  const adrs = readDecisions(root);
+  const active = adrs.filter(isActive);
+  const lines = [];
+  let state = OK;
+  const warn = (line) => {
+    state = WARN;
+    lines.push(line);
   };
-  for (const { statut, fichier } of changements) {
-    if (correspond(MOTIF_ADR, fichier)) {
-      if (statut === 'A') lignes.push(`ADR ajouté : ${fichier}`);
-      else attention(`ADR ${statut === 'D' ? 'supprimé' : 'modifié'} sur la branche : ${fichier} — à relire en PR`);
+  for (const { status, file } of changes) {
+    if (matches(ADR_PATTERN, file)) {
+      if (status === 'A') lines.push(`ADR added: ${file}`);
+      else warn(`ADR ${status === 'D' ? 'deleted' : 'modified'} on the branch: ${file} — review it in the PR`);
       continue;
     }
-    for (const adr of actifs) {
-      const motifs = adr.fichiers_proteges.filter((m) => correspond(m, fichier));
-      if (motifs.length) attention(`${fichier} ${statut === 'D' ? 'supprimé' : 'touché'} — protégé par ${adr.id} « ${adr.titre} » (motif : ${motifs.join(', ')})`);
+    for (const adr of active) {
+      const patterns = adr.protected_files.filter((p) => matches(p, file));
+      if (patterns.length) warn(`${file} ${status === 'D' ? 'deleted' : 'touched'} — protected by ${adr.id} "${adr.title}" (pattern: ${patterns.join(', ')})`);
     }
   }
   for (const adr of adrs) {
-    for (const e of adr.erreurs) attention(`${adr.fichier} : ${e}`);
+    for (const e of adr.errors) warn(`${adr.file}: ${e}`);
   }
-  for (const adr of actifs) {
-    for (const m of adr.fichiers_proteges) {
-      if (!suivis.some((f) => correspond(m, f))) attention(`${adr.id} : le motif « ${m} » ne désigne aucun fichier suivi`);
+  for (const adr of active) {
+    for (const p of adr.protected_files) {
+      if (!tracked.some((f) => matches(p, f))) warn(`${adr.id}: pattern "${p}" matches no tracked file`);
     }
   }
-  const parNumero = new Map();
+  const byNumber = new Map();
   for (const adr of adrs) {
-    const n = numeroDe(path.posix.basename(adr.fichier));
-    parNumero.set(n, [...(parNumero.get(n) ?? []), adr.fichier]);
+    const n = numberOf(path.posix.basename(adr.file));
+    byNumber.set(n, [...(byNumber.get(n) ?? []), adr.file]);
   }
-  for (const [, fichiers] of parNumero) {
-    if (fichiers.length > 1) attention(`même numéro pour plusieurs ADR : ${fichiers.join(', ')}`);
+  for (const [, files] of byNumber) {
+    if (files.length > 1) warn(`same number for several ADRs: ${files.join(', ')}`);
   }
-  if (etat === OK) {
-    lignes.unshift(adrs.length ? `${adrs.length} ADR lus : aucun fichier protégé touché, aucune anomalie` : 'aucun ADR dans docs/decisions/ : rien à contrôler');
+  if (state === OK) {
+    lines.unshift(adrs.length ? `${adrs.length} ADR(s) read: no protected file touched, no anomaly` : 'no ADR in docs/decisions/: nothing to check');
   }
-  return { titre: 'Décisions (ADR)', etat, lignes };
+  return { title: 'Decisions (ADRs)', state, lines };
 }
 
-const versionGitleaks = () => {
+const gitleaksVersion = () => {
   const r = spawnSync('gitleaks', ['version'], { encoding: 'utf8' });
   return r.status === 0 ? r.stdout.trim() : null;
 };
 
-function secretsParGitleaks(racine, base) {
-  const rapport = path.join(os.tmpdir(), `projectmind-gitleaks-${Date.now()}.json`);
+function secretsFromGitleaks(root, base) {
+  const report = path.join(os.tmpdir(), `projectmind-gitleaks-${Date.now()}.json`);
   const r = spawnSync('gitleaks', [
     'git', '--no-banner', '--redact', '--exit-code', '0',
-    '--report-format', 'json', '--report-path', rapport, `--log-opts=${base}..HEAD`, racine,
+    '--report-format', 'json', '--report-path', report, `--log-opts=${base}..HEAD`, root,
   ], { encoding: 'utf8' });
   try {
-    if (r.status !== 0) throw new ErreurAdr([`gitleaks a échoué (code ${r.status}) : ${(r.stderr ?? '').trim().split('\n').pop()}`]);
-    return JSON.parse(fs.readFileSync(rapport, 'utf8')).map((f) => ({
-      fichier: f.File, ligne: f.StartLine, type: f.RuleID, commit: f.Commit?.slice(0, 7),
+    if (r.status !== 0) throw new AdrError([`gitleaks failed (exit ${r.status}): ${(r.stderr ?? '').trim().split('\n').pop()}`]);
+    return JSON.parse(fs.readFileSync(report, 'utf8')).map((f) => ({
+      file: f.File, line: f.StartLine, type: f.RuleID, commit: f.Commit?.slice(0, 7),
     }));
   } finally {
-    fs.rmSync(rapport, { force: true });
+    fs.rmSync(report, { force: true });
   }
 }
 
-// Lignes ajoutées du diff, avec leur numéro dans la version de HEAD.
-function secretsParMotifs(racine, base) {
-  const trouves = [];
-  let fichier = null;
-  let ligne = 0;
-  for (const l of git(racine, ['diff', '-U0', '--no-color', '--no-ext-diff', base, 'HEAD']).split('\n')) {
+// Added lines of the diff, with their number in the HEAD version.
+function secretsFromPatterns(root, base) {
+  const found = [];
+  let file = null;
+  let line = 0;
+  for (const l of git(root, ['diff', '-U0', '--no-color', '--no-ext-diff', base, 'HEAD']).split('\n')) {
     if (l.startsWith('+++ ')) {
-      fichier = l.startsWith('+++ b/') ? l.slice(6) : null;
+      file = l.startsWith('+++ b/') ? l.slice(6) : null;
       continue;
     }
-    const entete = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(l);
-    if (entete) {
-      ligne = Number(entete[1]);
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(l);
+    if (hunk) {
+      line = Number(hunk[1]);
       continue;
     }
-    if (l.startsWith('+') && fichier) {
-      for (const [type, re] of MOTIFS_SECRETS) if (re.test(l)) trouves.push({ fichier, ligne, type });
-      ligne++;
+    if (l.startsWith('+') && file) {
+      for (const [type, re] of SECRET_PATTERNS) if (re.test(l)) found.push({ file, line, type });
+      line++;
     }
   }
-  return trouves;
+  return found;
 }
 
-function sectionSecrets(racine, base, changements, utiliserGitleaks) {
-  const titre = 'Secrets (ce que la branche ajoute)';
-  const version = utiliserGitleaks ? versionGitleaks() : null;
-  const outil = version ? `gitleaks ${version}` : `motifs intégrés (${MOTIFS_SECRETS.length} types, couverture partielle : gitleaks absent)`;
-  const trouves = version ? secretsParGitleaks(racine, base) : secretsParMotifs(racine, base);
-  const sensibles = changements.filter((c) => c.statut !== 'D' && FICHIER_SENSIBLE.test(c.fichier));
-  if (!trouves.length && !sensibles.length) return { titre, etat: OK, lignes: [`aucun secret trouvé — ${outil}`] };
+function secretsSection(root, base, changes, useGitleaks) {
+  const title = 'Secrets (what the branch adds)';
+  const version = useGitleaks ? gitleaksVersion() : null;
+  const tool = version ? `gitleaks ${version}` : `built-in patterns (${SECRET_PATTERNS.length} types, partial coverage: gitleaks not installed)`;
+  const found = version ? secretsFromGitleaks(root, base) : secretsFromPatterns(root, base);
+  const sensitive = changes.filter((c) => c.status !== 'D' && SENSITIVE_FILE.test(c.file));
+  if (!found.length && !sensitive.length) return { title, state: OK, lines: [`no secret found — ${tool}`] };
   return {
-    titre,
-    etat: ECHEC,
-    lignes: [
-      `${trouves.length + sensibles.length} alerte(s) — ${outil}. Valeurs masquées : ne pas ouvrir ces lignes pour les lire.`,
-      ...sensibles.map((s) => `${s.fichier} — fichier sensible versionné par la branche`),
-      ...trouves.map((t) => `${t.fichier}:${t.ligne} — ${t.type}${t.commit ? ` (commit ${t.commit})` : ''}`),
+    title,
+    state: FAIL,
+    lines: [
+      `${found.length + sensitive.length} alert(s) — ${tool}. Values masked: do not open these lines to read them.`,
+      ...sensitive.map((s) => `${s.file} — sensitive file committed by the branch`),
+      ...found.map((f) => `${f.file}:${f.line} — ${f.type}${f.commit ? ` (commit ${f.commit})` : ''}`),
     ],
   };
 }
 
-function sectionArbre(racine) {
-  const titre = 'Modifications non commitées';
-  const n = git(racine, ['status', '--porcelain']).split('\n').filter(Boolean).length;
-  if (!n) return { titre, etat: OK, lignes: ['aucune'] };
-  return { titre, etat: ATTENTION, lignes: [`${n} fichier(s) : la commande de contrôle les voit, les contrôles ADR et secrets non`] };
+function worktreeSection(root) {
+  const title = 'Uncommitted changes';
+  const n = git(root, ['status', '--porcelain']).split('\n').filter(Boolean).length;
+  if (!n) return { title, state: OK, lines: ['none'] };
+  return { title, state: WARN, lines: [`${n} file(s): the check command sees them, the ADR and secret checks do not`] };
 }
 
-export function controler(racine, { base, controle, sansControle = false, gitleaks = true } = {}) {
-  if (spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: racine }).status !== 0) {
-    throw new ErreurAdr([`pas un dépôt git : ${racine}`]);
+export function releaseCheck(root, { base, check, noCheck = false, gitleaks = true } = {}) {
+  if (spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: root }).status !== 0) {
+    throw new AdrError([`not a git repository: ${root}`]);
   }
-  const { config, erreurs } = lireConfig(racine);
-  const ref = base ?? config.base ?? baseParDefaut(racine);
-  if (!ref) throw new ErreurAdr(['aucune base trouvée (ni origin/HEAD, ni main, ni master) : passe --base <ref>']);
-  if (!existe(racine, ref)) throw new ErreurAdr([`base introuvable : ${ref}`]);
-  const commune = git(racine, ['merge-base', 'HEAD', ref]).trim();
-  const changements = lireChangements(racine, commune);
-  const suivis = git(racine, ['ls-files', '-z']).split('\0').filter(Boolean);
-  // L'état de l'arbre est relevé avant la commande de contrôle, qui peut créer des fichiers.
-  const arbre = sectionArbre(racine);
-  // L'id reste stable quand les titres changent de langue : c'est lui que lisent les tests et la sortie JSON.
+  const { config, errors } = readConfig(root);
+  const ref = base ?? config.base ?? defaultBase(root);
+  if (!ref) throw new AdrError(['no base found (no origin/HEAD, main or master): pass --base <ref>']);
+  if (!exists(root, ref)) throw new AdrError([`base not found: ${ref}`]);
+  const mergeBase = git(root, ['merge-base', 'HEAD', ref]).trim();
+  const changes = readChanges(root, mergeBase);
+  const tracked = git(root, ['ls-files', '-z']).split('\0').filter(Boolean);
+  // The worktree state is taken before the check command, which may create files.
+  const worktree = worktreeSection(root);
+  // The id stays stable when titles change: tests and the JSON output read it.
   const sections = [
-    ...(erreurs.length ? [{ id: 'configuration', titre: 'Configuration', etat: ATTENTION, lignes: erreurs }] : []),
-    { id: 'controle', ...sectionControle(racine, controle ?? config.controle, sansControle) },
-    { id: 'adr', ...sectionAdr(racine, changements, suivis) },
-    { id: 'secrets', ...sectionSecrets(racine, commune, changements, gitleaks) },
-    { id: 'arbre', ...arbre },
+    ...(errors.length ? [{ id: 'config', title: 'Configuration', state: WARN, lines: errors }] : []),
+    { id: 'check', ...checkSection(root, check ?? config.check, noCheck) },
+    { id: 'adr', ...adrSection(root, changes, tracked) },
+    { id: 'secrets', ...secretsSection(root, mergeBase, changes, gitleaks) },
+    { id: 'worktree', ...worktree },
   ];
-  const etats = sections.map((s) => s.etat);
+  const states = sections.map((s) => s.state);
   return {
-    branche: git(racine, ['rev-parse', '--abbrev-ref', 'HEAD']).trim(),
-    head: git(racine, ['rev-parse', '--short', 'HEAD']).trim(),
+    branch: git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).trim(),
+    head: git(root, ['rev-parse', '--short', 'HEAD']).trim(),
     base: ref,
-    commune: commune.slice(0, 7),
-    commits: Number(git(racine, ['rev-list', '--count', `${commune}..HEAD`]).trim()),
-    fichiers: changements.length,
+    mergeBase: mergeBase.slice(0, 7),
+    commits: Number(git(root, ['rev-list', '--count', `${mergeBase}..HEAD`]).trim()),
+    files: changes.length,
     sections,
-    verdict: etats.includes(ECHEC) ? ECHEC : etats.includes(ATTENTION) ? ATTENTION : OK,
+    verdict: states.includes(FAIL) ? FAIL : states.includes(WARN) ? WARN : OK,
   };
 }
 
-export function formater(r) {
+export function format(r) {
   const s = [
-    `Contrôle avant livraison — ${r.branche} (${r.head}) contre ${r.base} (base commune ${r.commune}) : ${r.commits} commit(s), ${r.fichiers} fichier(s)`,
+    `Release check — ${r.branch} (${r.head}) against ${r.base} (merge base ${r.mergeBase}): ${r.commits} commit(s), ${r.files} file(s)`,
   ];
-  if (!r.commits) s.push(`⚠ la branche n'a aucun commit d'avance sur ${r.base} : rien à comparer`);
-  for (const { titre, etat, lignes } of r.sections) s.push('', `${etat} ${titre}`, ...lignes.map((l) => `    ${l}`));
-  s.push('', `Verdict : ${r.verdict} ${VERDICTS[r.verdict]}`);
+  if (!r.commits) s.push(`⚠ the branch has no commit ahead of ${r.base}: nothing to compare`);
+  for (const { title, state, lines } of r.sections) s.push('', `${state} ${title}`, ...lines.map((l) => `    ${l}`));
+  s.push('', `Verdict: ${r.verdict} ${VERDICTS[r.verdict]}`);
   return `${s.join('\n')}\n`;
 }

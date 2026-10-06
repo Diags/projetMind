@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/garde-fou.mjs\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\""
           }
         ]
       }
