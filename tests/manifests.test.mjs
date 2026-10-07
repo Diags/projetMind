@@ -21,6 +21,17 @@ test('version: set in plugin.json only', () => {
   assert.equal(catalog.plugins[0].version, undefined);
 });
 
+test('package.json: the same plugin, version and license, a published bin, no dependency', () => {
+  const pkg = read('package.json');
+  assert.equal(pkg.name, plugin.name);
+  assert.equal(pkg.version, plugin.version, 'bump both versions together (ADR-006)');
+  assert.equal(pkg.license, plugin.license);
+  const bin = pkg.bin.projectmind;
+  assert.ok(fs.existsSync(url(bin)), bin);
+  assert.ok(pkg.files.some((f) => bin.startsWith(f)), `${bin} is not in "files"`);
+  assert.deepEqual(Object.keys(pkg).filter((k) => /dependencies$/i.test(k)), [], 'no dependency (ADR-006)');
+});
+
 test('the hook and the skills only call scripts that exist', () => {
   const texts = [
     fs.readFileSync(url('hooks/hooks.json'), 'utf8'),

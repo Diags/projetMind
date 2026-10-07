@@ -24,7 +24,8 @@ network, fetches nothing, and has no telemetry.
 - **Runs**: its own Node scripts in `scripts/` and `hooks/`; read-only `git` commands (`ls-files`,
   `log`, `diff`, `status`, `rev-parse`, `rev-list`, `merge-base`, `symbolic-ref`); `gitleaks` when it is
   installed; and, for `/projectmind:release-check` only, the check command the project declares in
-  `.projectmind.json` or passes with `--check`, through `bash` at the project root.
+  `.projectmind.json` or passes with `--check` (or, when none is declared, its usual test command,
+  [detected](#project-setting) from its files), through `bash` at the project root.
 - **Reads**: the ADRs in `docs/decisions/`, the `.md` files tracked by git, the project setting
   (`.projectmind.json`, or `.claude/projectmind.json`), and the hook input that Claude Code sends.
 - **Writes**: a new ADR in `docs/decisions/`, only after the user's "yes" in
@@ -55,9 +56,10 @@ or `/plugin` → Marketplaces → projectmind → Enable auto-update.
 Teammates only get a new version when `version` changes in
 `.claude-plugin/plugin.json`: a commit without a version change does not reach them.
 
-1. Bump `version` in `plugin.json` (not in `marketplace.json`).
-2. `node --test` and `claude plugin validate . --strict`.
+1. Bump `version` in `plugin.json` and in `package.json`, to the same value (not in `marketplace.json`).
+2. `npm test`, `claude plugin validate . --strict`, and `npm pack --dry-run` to see what npm will publish.
 3. Commit, then `claude plugin tag` to set the `projectmind--v<version>` tag, and push.
+4. `npm publish`.
 
 ## Local development
 
@@ -81,6 +83,32 @@ when it is alone; when both exist, `.projectmind.json` wins and the report says 
 `check` runs with `bash` at the project root. Without `base`, the base is `origin/HEAD`,
 then `main`, then `master`. The `--check`, `--base` and `--no-check` options of
 `/projectmind:release-check` override this setting. The pre-v2 key `controle` is still read as `check`.
+
+**Without a declared command**, the release check runs the project's usual test command, taken from
+the first of these files that announces one, and the report says which file it came from:
+
+| File | Command |
+|---|---|
+| `package.json` with a `test` script (npm's placeholder script is ignored) | `npm test`, or `pnpm test`, `yarn test`, `bun run test` when their lockfile is there |
+| `Cargo.toml` | `cargo test` |
+| `go.mod` | `go test ./...` |
+| `pytest.ini`, or `[tool.pytest.ini_options]` in `pyproject.toml` | `pytest` |
+| `Makefile` with a `test:` target | `make test` |
+
+## Command line, for any AI tool
+
+The npm package `projectmind` runs the same commands without Claude Code: from Codex, Cursor,
+Copilot, Gemini CLI or any other tool that can run a shell command, or by hand. It has no dependency.
+
+```bash
+npx projectmind@2.0.0 why src/payment.ts
+npx projectmind@2.0.0 release-check --no-check
+npx projectmind@2.0.0 adr list
+echo '{"title": "…", "reason": "…", "context": "…", "decision": "…"}' | npx projectmind@2.0.0 adr create --dry-run
+```
+
+`npx projectmind --help` lists every option. The skills and the guard for each tool come with
+`npx projectmind init`, in a later version.
 
 ## ADR format
 

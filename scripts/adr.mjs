@@ -1,14 +1,15 @@
 #!/usr/bin/env node
-// Command-line tool for ADRs, called by the /projectmind:remember skill.
+// Command-line tool for ADRs, called by the /projectmind:remember skill and by `projectmind adr`.
 //   node adr.mjs list [--root <dir>]
 //   node adr.mjs create [--dry-run] [--root <dir>]    the ADR comes as JSON on stdin
 
 import fs from 'node:fs';
 import { create, readDecisions, AdrError } from './lib/adr.mjs';
+import { handleError, isMain } from './lib/cli.mjs';
 
-const USAGE = `Usage:
-  node adr.mjs list [--root <dir>]
-  node adr.mjs create [--dry-run] [--root <dir>]   (JSON object on stdin)`;
+const usage = (name) => `Usage:
+  ${name} list [--root <dir>]
+  ${name} create [--dry-run] [--root <dir>]   (JSON object on stdin)`;
 
 function readOptions(args) {
   const options = { root: process.cwd(), dryRun: false };
@@ -23,28 +24,32 @@ function readOptions(args) {
   return options;
 }
 
-try {
-  const [command, ...args] = process.argv.slice(2);
-  if (command === 'list') {
-    const { root } = readOptions(args);
-    console.log(JSON.stringify(readDecisions(root), null, 2));
-  } else if (command === 'create') {
-    const { root, dryRun } = readOptions(args);
-    let input;
-    try {
-      input = JSON.parse(fs.readFileSync(0, 'utf8').replace(/^﻿/, ''));
-    } catch (e) {
-      throw new AdrError([`invalid JSON on stdin: ${e.message}`]);
+// Returns the exit code: 0, 1 on an error, 2 on a usage error.
+export function run(args, name = 'node adr.mjs') {
+  try {
+    const [command, ...rest] = args;
+    if (command === 'list') {
+      const { root } = readOptions(rest);
+      console.log(JSON.stringify(readDecisions(root), null, 2));
+    } else if (command === 'create') {
+      const { root, dryRun } = readOptions(rest);
+      let input;
+      try {
+        input = JSON.parse(fs.readFileSync(0, 'utf8').replace(/^﻿/, ''));
+      } catch (e) {
+        throw new AdrError([`invalid JSON on stdin: ${e.message}`]);
+      }
+      const { file, content } = create(root, input, { dryRun });
+      if (dryRun) process.stdout.write(`Preview, nothing written: ${file}\n\n${content}`);
+      else console.log(`ADR created: ${file}`);
+    } else {
+      console.error(usage(name));
+      return 2;
     }
-    const { file, content } = create(root, input, { dryRun });
-    if (dryRun) process.stdout.write(`Preview, nothing written: ${file}\n\n${content}`);
-    else console.log(`ADR created: ${file}`);
-  } else {
-    console.error(USAGE);
-    process.exitCode = 2;
+    return 0;
+  } catch (e) {
+    return handleError(e, 1);
   }
-} catch (e) {
-  if (!(e instanceof AdrError)) throw e;
-  console.error(`Error:\n- ${e.errors.join('\n- ')}`);
-  process.exitCode = 1;
 }
+
+if (isMain(import.meta.url)) process.exitCode = run(process.argv.slice(2));

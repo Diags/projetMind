@@ -1,0 +1,24 @@
+{
+  "name": "projectmind",
+  "version": "2.0.0",
+  "description": "Keeps the memory of a project's decisions and warns before one of them is broken.",
+  "keywords": ["adr", "architecture-decision-records", "madr", "decisions", "guardrails", "project-memory"],
+  "homepage": "https://github.com/Diags/projetMind#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Diags/projetMind.git"
+  },
+  "license": "MIT",
+  "author": "Diaguily SYLLA <diaguilybouna@gmail.com>",
+  "type": "module",
+  "bin": {
+    "projectmind": "bin/projectmind.mjs"
+  },
+  "files": ["bin/", "scripts/"],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

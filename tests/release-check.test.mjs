@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { create } from '../scripts/lib/adr.mjs';
-import { WARN, FAIL, OK, releaseCheck, format, readConfig } from '../scripts/lib/release-check.mjs';
+import { WARN, FAIL, OK, releaseCheck, format, readConfig, detectCheck } from '../scripts/lib/release-check.mjs';
 
 const CLI = fileURLToPath(new URL('../scripts/release-check.mjs', import.meta.url));
 const GITLEAKS = spawnSync('gitleaks', ['version']).status === 0;
@@ -120,7 +120,7 @@ test('no declared command, or uncommitted files → ⚠', () => {
   write(root, 'draft.txt', 'x');
   const r = releaseCheck(root, { gitleaks: false });
   assert.equal(section(r, 'check').state, WARN);
-  assert.match(section(r, 'check').lines[0], /no check command declared/);
+  assert.match(section(r, 'check').lines[0], /no check command declared or detected/);
   assert.equal(section(r, 'check').log, undefined);
   assert.equal(section(r, 'worktree').state, WARN);
   assert.equal(r.verdict, WARN);
@@ -155,6 +155,51 @@ test('pre-v2 settings: .claude/projectmind.json and the "controle" key are still
     '.claude/projectmind.json ignored: .projectmind.json takes precedence',
     '.projectmind.json: "check" and "controle" are the same setting: "check" is kept',
   ]);
+});
+
+test('detectCheck: the usual test command, from the files that announce it', () => {
+  const npm = (test) => JSON.stringify({ scripts: { test } });
+  const cases = [
+    [{}, null],
+    [{ 'package.json': npm('echo "Error: no test specified" && exit 1') }, null],
+    [{ 'package.json': JSON.stringify({ scripts: { build: 'tsc' } }) }, null],
+    [{ 'package.json': npm('node --test') }, { command: 'npm test', from: 'package.json' }],
+    [{ 'package.json': npm('vitest'), 'pnpm-lock.yaml': '' }, { command: 'pnpm test', from: 'package.json' }],
+    [{ 'package.json': npm('jest'), 'yarn.lock': '' }, { command: 'yarn test', from: 'package.json' }],
+    [{ 'package.json': npm('bun test'), 'bun.lock': '' }, { command: 'bun run test', from: 'package.json' }],
+    [{ 'package.json': '{ broken', 'Cargo.toml': '' }, { command: 'cargo test', from: 'Cargo.toml' }],
+    [{ 'go.mod': 'module x\n' }, { command: 'go test ./...', from: 'go.mod' }],
+    [{ 'pytest.ini': '[pytest]\n' }, { command: 'pytest', from: 'pytest.ini' }],
+    [{ 'pyproject.toml': '[project]\nname = "x"\n\n[tool.pytest.ini_options]\naddopts = "-q"\n' }, { command: 'pytest', from: 'pyproject.toml' }],
+    [{ 'pyproject.toml': '[project]\nname = "x"\n' }, null],
+    [{ Makefile: 'build:\n\tcc x.c\ntest: build\n\t./x\n' }, { command: 'make test', from: 'Makefile' }],
+    [{ Makefile: 'build:\n\tcc x.c\n' }, null],
+  ];
+  for (const [files, expected] of cases) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'projectmind-'));
+    temporary.push(root);
+    for (const [file, content] of Object.entries(files)) write(root, file, content);
+    assert.deepEqual(detectCheck(root), expected, JSON.stringify(files));
+  }
+});
+
+test('without a declared command, the detected one runs and the report says where it comes from', () => {
+  const root = repo({ clean: true });
+  write(root, 'package.json', JSON.stringify({ scripts: { test: 'echo detected-run' } }));
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'package');
+  const check = section(releaseCheck(root, { gitleaks: false }), 'check');
+  assert.equal(check.state, OK, check.lines.join('\n'));
+  assert.equal(check.detectedFrom, 'package.json');
+  assert.equal(check.lines[0], 'command detected from package.json: declare "check" in .projectmind.json to change it');
+  assert.match(check.lines[1], /^npm test → exit 0, \d+ s$/);
+  assert.match(fs.readFileSync(check.log, 'utf8'), /detected-run/);
+  fs.rmSync(check.log);
+  const declared = section(releaseCheck(root, { check: 'echo declared', gitleaks: false }), 'check');
+  assert.equal(declared.detectedFrom, undefined, 'a declared command wins over detection');
+  assert.match(declared.lines[0], /^echo declared → exit 0/);
+  fs.rmSync(declared.log);
+  assert.deepEqual(section(releaseCheck(root, { noCheck: true, gitleaks: false }), 'check').lines, ['not run (--no-check)']);
 });
 
 test('CLI: exit code 1 if not ready, 0 if ready, 2 if the base is not found', () => {

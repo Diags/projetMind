@@ -76,6 +76,38 @@ export function readConfig(root) {
   return { config, errors, file };
 }
 
+// The project's usual test command, for a project that declares none (plug and play): from
+// package.json, Cargo.toml, go.mod, the pytest settings or a "test" target in the Makefile, in
+// that order. Returns { command, from } or null.
+export function detectCheck(root) {
+  const read = (f) => {
+    try {
+      return fs.readFileSync(path.join(root, f), 'utf8').replace(/^﻿/, '');
+    } catch {
+      return null;
+    }
+  };
+  const has = (f) => fs.existsSync(path.join(root, f));
+  let pkg = null;
+  try {
+    pkg = JSON.parse(read('package.json') ?? 'null');
+  } catch {
+    pkg = null;
+  }
+  const test = pkg?.scripts?.test;
+  // npm init writes a test script that only fails: it is not a check.
+  if (typeof test === 'string' && test.trim() && !test.includes('no test specified')) {
+    const runner = has('pnpm-lock.yaml') ? 'pnpm' : has('yarn.lock') ? 'yarn' : has('bun.lock') || has('bun.lockb') ? 'bun run' : 'npm';
+    return { command: `${runner} test`, from: 'package.json' };
+  }
+  if (has('Cargo.toml')) return { command: 'cargo test', from: 'Cargo.toml' };
+  if (has('go.mod')) return { command: 'go test ./...', from: 'go.mod' };
+  if (has('pytest.ini')) return { command: 'pytest', from: 'pytest.ini' };
+  if (/^\[tool\.pytest\.ini_options\]/m.test(read('pyproject.toml') ?? '')) return { command: 'pytest', from: 'pyproject.toml' };
+  if (/^test\s*:/m.test(read('Makefile') ?? '')) return { command: 'make test', from: 'Makefile' };
+  return null;
+}
+
 // Files changed between the merge base and HEAD: [{ status: A|M|D|T, file }].
 function readChanges(root, base) {
   const fields = git(root, ['diff', '--name-status', '--no-renames', '-z', base, 'HEAD']).split('\0').filter(Boolean);
@@ -84,14 +116,16 @@ function readChanges(root, base) {
   return changes;
 }
 
-function checkSection(root, command, noCheck) {
+function checkSection(root, command, noCheck, detectedFrom) {
   const title = 'Check command';
   if (noCheck) return { title, state: WARN, lines: ['not run (--no-check)'] };
-  if (!command) return { title, state: WARN, lines: [`no check command declared: add "check" to ${CONFIG_FILE}`] };
+  if (!command) return { title, state: WARN, lines: [`no check command declared or detected: add "check" to ${CONFIG_FILE}`] };
+  const origin = detectedFrom ? { detectedFrom } : {};
+  const note = detectedFrom ? [`command detected from ${detectedFrom}: declare "check" in ${CONFIG_FILE} to change it`] : [];
   const start = Date.now();
   const r = spawnSync('bash', ['-c', `{ ${command}\n} 2>&1`], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   const seconds = Math.round((Date.now() - start) / 1000);
-  if (r.error) return { title, state: FAIL, lines: [`${command}: could not start (${r.error.message})`] };
+  if (r.error) return { title, state: FAIL, ...origin, lines: [...note, `${command}: could not start (${r.error.message})`] };
   const output = (r.stdout ?? '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
   const log = path.join(os.tmpdir(), `projectmind-check-${Date.now()}.log`);
   fs.writeFileSync(log, output);
@@ -100,8 +134,9 @@ function checkSection(root, command, noCheck) {
   return {
     title,
     state,
+    ...origin,
     log,
-    lines: [`${command} → exit ${r.status ?? r.signal}, ${seconds} s`, `full log: ${log}`, ...tail.map((l) => `│ ${l}`)],
+    lines: [...note, `${command} → exit ${r.status ?? r.signal}, ${seconds} s`, `full log: ${log}`, ...tail.map((l) => `│ ${l}`)],
   };
 }
 
@@ -229,10 +264,12 @@ export function releaseCheck(root, { base, check, noCheck = false, gitleaks = tr
   const tracked = git(root, ['ls-files', '-z']).split('\0').filter(Boolean);
   // The worktree state is taken before the check command, which may create files.
   const worktree = worktreeSection(root);
+  const declared = check ?? config.check;
+  const detected = declared || noCheck ? null : detectCheck(root);
   // The id stays stable when titles change: tests and the JSON output read it.
   const sections = [
     ...(errors.length ? [{ id: 'config', title: 'Configuration', state: WARN, lines: errors }] : []),
-    { id: 'check', ...checkSection(root, check ?? config.check, noCheck) },
+    { id: 'check', ...checkSection(root, declared ?? detected?.command, noCheck, detected?.from) },
     { id: 'adr', ...adrSection(root, changes, tracked) },
     { id: 'secrets', ...secretsSection(root, mergeBase, changes, gitleaks) },
     { id: 'worktree', ...worktree },
