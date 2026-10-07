@@ -258,6 +258,18 @@ test('CLI: dry run, create, list', () => {
   assert.equal(JSON.parse(list.stdout).length, 1);
 });
 
+test('CLI: the ADR may come from a file, for shells without "<"', () => {
+  const root = emptyProject();
+  const input = path.join(root, 'adr.json');
+  fs.writeFileSync(input, JSON.stringify(INPUT));
+  const dry = run(['create', '--dry-run', '--root', root, '--input', input]);
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, /^Preview, nothing written: docs\/decisions\/ADR-001-/);
+  const missing = run(['create', '--root', root, '--input', path.join(root, 'missing.json')]);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /cannot read/);
+});
+
 test('CLI: readable errors with exit code 1, usage with exit code 2', () => {
   const root = emptyProject();
   const json = run(['create', '--root', root], '{ not json');

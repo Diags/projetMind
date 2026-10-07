@@ -33,7 +33,9 @@ network, fetches nothing, and has no telemetry.
   (`projectmind-check-*.log`); a temporary gitleaks report, deleted right after reading it; and,
   after `projectmind allow`, the user's time-limited permissions, in the temporary folder too
   (`projectmind-allowed-*.json`).
-  Nothing else: it never commits, pushes or edits the project's files. The project's check command
+  When you run `projectmind init` or `uninstall`, the configuration files listed in
+  [its section](#set-up-the-other-ai-tools-init), and nothing else.
+  It never commits, pushes or edits the project's other files. The project's check command
   does what the project wrote it to do, including writing files.
 
 ## Install
@@ -109,8 +111,41 @@ npx projectmind@2.0.0 adr list
 echo '{"title": "…", "reason": "…", "context": "…", "decision": "…"}' | npx projectmind@2.0.0 adr create --dry-run
 ```
 
-`npx projectmind --help` lists every option. The skills and the guard for each tool come with
-`npx projectmind init`, in a later version.
+`npx projectmind --help` lists every option.
+
+## Set up the other AI tools: `init`
+
+In the project, run once:
+
+```bash
+npx projectmind@2.0.0 init                         # the tools found in the project
+npx projectmind@2.0.0 init --tools all --dry-run   # what it would write, for every tool
+```
+
+`init` finds the tools from their files (`.claude/` or `CLAUDE.md`, `.codex/`, `.cursor/` or
+`.cursorrules`, `.github/copilot-instructions.md` or `.github/hooks/`, `.gemini/` or `GEMINI.md`),
+or takes them from `--tools`. For each tool it writes:
+
+| Tool | Files |
+|---|---|
+| Claude Code | `.claude/settings.json`: the catalog and the plugin, for the whole team |
+| Codex | `.codex/hooks.json`, the skills, `AGENTS.md` |
+| Cursor | `.cursor/hooks.json`, the skills, `AGENTS.md` |
+| Copilot | `.github/hooks/projectmind.json`, the skills, `AGENTS.md` |
+| Gemini CLI | `.gemini/settings.json`, `.gemini/commands/projectmind/*.toml`, the skills |
+
+The skills, in `.agents/skills/projectmind-*/SKILL.md`, follow the [Agent Skills](https://agentskills.io)
+standard. Every hook and skill runs `npx --yes projectmind@<version>`, pinned to the version that
+wrote it; `--source <npm spec>` uses another package, such as a tarball. Existing files are
+completed, never replaced, and running `init` again changes nothing. Commit the files so that the
+whole team gets them.
+
+`npx projectmind@2.0.0 uninstall` removes what `init` wrote: its files, its entries in the files
+it completed, its block in `AGENTS.md`, and the folders left empty. A completed file gets its
+content back, and its layout too, unless it had several values on one line.
+
+**Speed.** Through `npx`, a guard call takes about 2.7 s on Windows (measured), against about
+0.3 s when Node runs the script directly, as the Claude Code plugin does.
 
 ## The guard in each tool
 

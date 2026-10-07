@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Command-line tool for ADRs, called by the /projectmind:remember skill and by `projectmind adr`.
 //   node adr.mjs list [--root <dir>]
-//   node adr.mjs create [--dry-run] [--root <dir>]    the ADR comes as JSON on stdin
+//   node adr.mjs create [--dry-run] [--root <dir>] [--input <file>]
+// The ADR comes as a JSON object, from --input or else on stdin (PowerShell has no "<").
 
 import fs from 'node:fs';
 import { create, readDecisions, AdrError } from './lib/adr.mjs';
@@ -9,13 +10,14 @@ import { handleError, isMain } from './lib/cli.mjs';
 
 const usage = (name) => `Usage:
   ${name} list [--root <dir>]
-  ${name} create [--dry-run] [--root <dir>]   (JSON object on stdin)`;
+  ${name} create [--dry-run] [--root <dir>] [--input <file>]   (JSON object in the file, or on stdin)`;
 
 function readOptions(args) {
-  const options = { root: process.cwd(), dryRun: false };
+  const options = { root: process.cwd(), dryRun: false, input: null };
   for (let k = 0; k < args.length; k++) {
     if (args[k] === '--dry-run') options.dryRun = true;
     else if (args[k] === '--root' && args[k + 1]) options.root = args[++k];
+    else if (args[k] === '--input' && args[k + 1]) options.input = args[++k];
     else throw new AdrError([`unknown option: ${args[k]}`]);
   }
   if (!fs.existsSync(options.root) || !fs.statSync(options.root).isDirectory()) {
@@ -32,12 +34,18 @@ export function run(args, name = 'node adr.mjs') {
       const { root } = readOptions(rest);
       console.log(JSON.stringify(readDecisions(root), null, 2));
     } else if (command === 'create') {
-      const { root, dryRun } = readOptions(rest);
+      const { root, dryRun, input: from } = readOptions(rest);
+      let text;
+      try {
+        text = fs.readFileSync(from ?? 0, 'utf8');
+      } catch (e) {
+        throw new AdrError([`cannot read ${from}: ${e.message}`]);
+      }
       let input;
       try {
-        input = JSON.parse(fs.readFileSync(0, 'utf8').replace(/^﻿/, ''));
+        input = JSON.parse(text.replace(/^﻿/, ''));
       } catch (e) {
-        throw new AdrError([`invalid JSON on stdin: ${e.message}`]);
+        throw new AdrError([`invalid JSON ${from ? `in ${from}` : 'on stdin'}: ${e.message}`]);
       }
       const { file, content } = create(root, input, { dryRun });
       if (dryRun) process.stdout.write(`Preview, nothing written: ${file}\n\n${content}`);

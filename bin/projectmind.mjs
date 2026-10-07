@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { run as adr } from '../scripts/adr.mjs';
 import { run as allow } from '../scripts/allow.mjs';
 import { run as guard } from '../scripts/guard.mjs';
+import { run as setup } from '../scripts/init.mjs';
 import { run as releaseCheck } from '../scripts/release-check.mjs';
 import { run as why } from '../scripts/why.mjs';
 
@@ -15,13 +16,19 @@ const COMMANDS = {
   'release-check': releaseCheck,
   guard: (args) => guard(args, { name: 'projectmind guard' }),
   allow: (args) => allow(args, 'projectmind allow'),
+  init: (args) => setup(['init', ...args], 'projectmind'),
+  uninstall: (args) => setup(['uninstall', ...args], 'projectmind'),
 };
 
 const USAGE = `Usage: projectmind <command> [options]
 
 Commands:
+  init [--tools <list>|all] [--dry-run] [--root <dir>] [--source <npm spec>]
+                                           set ProjectMind up for the project's AI tools
+  uninstall [--dry-run] [--root <dir>]     remove what init wrote
   adr list [--root <dir>]                  the project's ADRs, as JSON
-  adr create [--dry-run] [--root <dir>]    create an ADR from a JSON object on stdin
+  adr create [--dry-run] [--root <dir>] [--input <file>]
+                                           create an ADR from a JSON object (file or stdin)
   why [--root <dir>] [--json] <file>       what the project knows about a file
   release-check [--root <dir>] [--base <ref>] [--check "<command>"] [--no-check] [--json]
                                            ✓/⚠/✗ report on the current branch
