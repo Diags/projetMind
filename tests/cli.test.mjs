@@ -21,7 +21,7 @@ test('projectmind: --version, --help, and an unknown command', () => {
     const help = run(args);
     assert.equal(help.status, 0, help.stderr);
     assert.match(help.stdout, /^Usage: projectmind <command> \[options\]/);
-    for (const command of ['adr list', 'adr create', 'why', 'release-check']) assert.match(help.stdout, new RegExp(`\\n  ${command} `));
+    for (const command of ['adr list', 'adr create', 'why', 'release-check', 'guard', 'allow']) assert.match(help.stdout, new RegExp(`\\n  ${command} `));
   }
   const unknown = run(['nope']);
   assert.equal(unknown.status, 2);

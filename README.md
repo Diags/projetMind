@@ -14,7 +14,7 @@ The plugin itself stores nothing.
 | `/projectmind:remember <decision>` | Prepares a numbered ADR (`docs/decisions/ADR-NNN-<slug>.md`), shows a preview, and writes it only after your "yes". Only the user can run this command. |
 | `/projectmind:why <file>` | Tells what the project knows about a file: ADRs that protect or cite it, mentions in every `.md` file tracked by git (existing registers, without declaring them), the last 5 commits. Each item gives its source (`DEBT.md:110`, `ADR-001`, hash). Changes nothing. |
 | `/projectmind:release-check` | ✓/⚠/✗ report on a branch against its base: the project's check command, protected files and ADRs touched, secrets in what the branch adds (gitleaks when installed, otherwise a few built-in patterns). A secret is never shown, only its file, line and type. Fixes nothing, never fetches. |
-| Guard | Before Claude edits a file protected by an ADR, Claude Code asks for confirmation, citing the ADR, its reason and its rejected alternatives. ADR files themselves are protected. |
+| Guard | Before the AI tool edits a file protected by an ADR, it is stopped with the ADR, its reason and its rejected alternatives. Claude Code and Copilot CLI ask for confirmation; the other tools refuse and tell the agent to ask you (see [the guard in each tool](#the-guard-in-each-tool)). ADR files themselves are protected. |
 
 ## What it runs, reads and writes
 
@@ -30,7 +30,9 @@ network, fetches nothing, and has no telemetry.
   (`.projectmind.json`, or `.claude/projectmind.json`), and the hook input that Claude Code sends.
 - **Writes**: a new ADR in `docs/decisions/`, only after the user's "yes" in
   `/projectmind:remember`; the check command's full log in the system's temporary folder
-  (`projectmind-check-*.log`); and a temporary gitleaks report, deleted right after reading it.
+  (`projectmind-check-*.log`); a temporary gitleaks report, deleted right after reading it; and,
+  after `projectmind allow`, the user's time-limited permissions, in the temporary folder too
+  (`projectmind-allowed-*.json`).
   Nothing else: it never commits, pushes or edits the project's files. The project's check command
   does what the project wrote it to do, including writing files.
 
@@ -110,6 +112,27 @@ echo '{"title": "…", "reason": "…", "context": "…", "decision": "…"}' | 
 `npx projectmind --help` lists every option. The skills and the guard for each tool come with
 `npx projectmind init`, in a later version.
 
+## The guard in each tool
+
+Each tool's pre-edit hook runs `projectmind guard <tool>`, which reads the tool's hook input and
+answers in that tool's format. Not every tool can ask the user before an edit, so the guard does
+the strongest thing each one allows:
+
+| Tool | Hook file | On a protected file | Tested |
+|---|---|---|---|
+| Claude Code | the plugin's `hooks/hooks.json` | asks for confirmation | contract tests; the hook script run as Claude Code runs it |
+| Copilot CLI | `.github/hooks/*.json` | asks for confirmation | contract tests, from the docs |
+| Copilot cloud agent | `.github/hooks/*.json` | refuses ("ask" counts as "deny" there) | contract tests, from the docs |
+| Codex | `.codex/hooks.json` | refuses, then `projectmind allow` | contract tests, from the docs and Codex's patch grammar |
+| Cursor | `.cursor/hooks.json` | refuses, then `projectmind allow` | contract tests, from the docs |
+| Gemini CLI | `.gemini/settings.json` | refuses, then `projectmind allow` | contract tests, from the docs |
+| VS Code agent | `.github/hooks/*.json` | asks for confirmation, best effort | not tested: its tool names are not documented in what we read |
+
+When a tool refuses, the reason tells the agent to ask you in the chat and, only if you agree, to
+run `npx --yes projectmind@<version> allow <file>`: the edit then goes through for 10 minutes
+(`--minutes` changes that). An internal error of the guard never blocks the edit: it exits the way
+that lets each tool proceed (exit code 0 for Copilot, which blocks on any other code).
+
 ## ADR format
 
 Compatible with [MADR 4](https://adr.github.io/madr/) (see ADR-003):
@@ -152,8 +175,10 @@ already protects.
 
 - **Permission mode.** According to the Claude Code docs, the confirmation request becomes a refusal
   in auto mode, and an approval in `bypassPermissions` mode.
-- **Shell.** A write made through a command (`sed -i`, `>`, `rm`) is not watched: only the
-  Edit, Write, MultiEdit and NotebookEdit tools are.
+- **Shell.** A write made through a command (`sed -i`, `>`, `rm`) is not watched, in any tool:
+  only the tools' file-editing tools are.
+- **Consent.** The guard cannot tell whether you really agreed: `projectmind allow` is a visible
+  step that the agent runs, and many tools ask you before running a shell command.
 - **Release check.** The verdict does not know about failures specific to one machine: Claude
   explains them by citing the project's docs. Secrets are only searched in the branch's commits,
   not in uncommitted changes.

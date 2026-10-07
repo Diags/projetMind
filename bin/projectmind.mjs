@@ -4,6 +4,8 @@
 
 import fs from 'node:fs';
 import { run as adr } from '../scripts/adr.mjs';
+import { run as allow } from '../scripts/allow.mjs';
+import { run as guard } from '../scripts/guard.mjs';
 import { run as releaseCheck } from '../scripts/release-check.mjs';
 import { run as why } from '../scripts/why.mjs';
 
@@ -11,6 +13,8 @@ const COMMANDS = {
   adr: (args) => adr(args, 'projectmind adr'),
   why: (args) => why(args, 'projectmind why'),
   'release-check': releaseCheck,
+  guard: (args) => guard(args, { name: 'projectmind guard' }),
+  allow: (args) => allow(args, 'projectmind allow'),
 };
 
 const USAGE = `Usage: projectmind <command> [options]
@@ -21,6 +25,10 @@ Commands:
   why [--root <dir>] [--json] <file>       what the project knows about a file
   release-check [--root <dir>] [--base <ref>] [--check "<command>"] [--no-check] [--json]
                                            ✓/⚠/✗ report on the current branch
+  guard <claude-code|codex|copilot|cursor|gemini>
+                                           pre-edit hook: the tool's hook input on stdin
+  allow [--root <dir>] [--minutes <n>] <file>…
+                                           after the user said yes: lets a blocked edit through
 
 Options:
   --help       show this help
