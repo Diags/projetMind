@@ -6,11 +6,15 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { AdrError } from './adr.mjs';
-import { BLOCK_END, BLOCK_START, SKILLS, agentsBlock, geminiCommand, skillFile } from './templates.mjs';
+import { BLOCK_END, BLOCK_START, SKILLS, agentsBlock, geminiCommand, preCommitHook, skillFile } from './templates.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
-export const TOOLS = ['claude-code', 'codex', 'cursor', 'copilot', 'gemini'];
+export const AI_TOOLS = ['claude-code', 'codex', 'cursor', 'copilot', 'gemini'];
+// "git" is the pre-commit safety net, for every tool and for humans.
+export const TOOLS = [...AI_TOOLS, 'git'];
+const PRE_COMMIT = '.git/hooks/pre-commit';
 const MARKETPLACE = { source: { source: 'github', repo: 'Diags/projetMind' } };
 const PLUGIN = 'projectmind@projectmind';
 // The tools that read .agents/skills/ and AGENTS.md (Gemini CLI reads the skills only).
@@ -28,8 +32,15 @@ export function detectTools(root) {
     cursor: has('.cursor') || has('.cursorrules'),
     copilot: has('.github/copilot-instructions.md') || has('.github/hooks') || has('.github/copilot'),
     gemini: has('.gemini') || has('GEMINI.md'),
+    git: isGitRoot(root),
   };
   return TOOLS.filter((t) => found[t]);
+}
+
+// The root of a git repository with its own .git folder (not a worktree or a submodule).
+export function isGitRoot(root) {
+  const dotGit = path.join(root, '.git');
+  return fs.existsSync(dotGit) && fs.statSync(dotGit).isDirectory();
 }
 
 const quote = (s) => (/[\s"'$`\\]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s);
@@ -117,8 +128,21 @@ function agentsRemoval(root) {
 
 const replaceOurs = (rel, items, key, entry) => [...list(rel, items, key).filter((e) => !isOurs(e)), entry];
 
-export function planInit(root, tools, { source } = {}) {
-  const cli = cliCommand(source);
+// The pre-commit hook, or a note saying why init leaves it to the user: another hook manager,
+// an existing hook, or no .git folder of its own.
+function gitHook(root, cli) {
+  const line = `${cli} check-staged`;
+  if (!isGitRoot(root)) return { note: `git: not the root of a git repository with its own .git folder; add \`${line}\` to your pre-commit hook.` };
+  const hooksPath = spawnSync('git', ['config', '--get', 'core.hooksPath'], { cwd: root, encoding: 'utf8' }).stdout?.trim();
+  if (hooksPath) return { note: `git: core.hooksPath is set to ${hooksPath}; add \`${line}\` to the pre-commit hook there.` };
+  const before = readText(root, PRE_COMMIT);
+  if (before !== null && !/projectmind/.test(before)) return { note: `git: ${PRE_COMMIT} already exists; add \`${line}\` to it.` };
+  return { change: { file: PRE_COMMIT, before, after: preCommitHook(cli), mode: 0o755 } };
+}
+
+// notes collects what init leaves to the user. cli replaces the whole command (tests).
+export function planInit(root, tools, { source, cli: command, notes = [] } = {}) {
+  const cli = command ?? cliCommand(source);
   const guard = (tool) => `${cli} guard ${tool}`;
   const changes = [];
   if (tools.includes('claude-code')) {
@@ -165,6 +189,11 @@ export function planInit(root, tools, { source } = {}) {
     for (const name of SKILLS) changes.push(fileChange(root, `.agents/skills/projectmind-${name}/SKILL.md`, skillFile(name, cli)));
   }
   if (tools.some((t) => AGENTS_TOOLS.includes(t))) changes.push(agentsChange(root, cli));
+  if (tools.includes('git')) {
+    const { change, note } = gitHook(root, cli);
+    if (change) changes.push(change);
+    else notes.push(note);
+  }
   return changes;
 }
 
@@ -195,6 +224,7 @@ export function planUninstall(root) {
     ...SKILLS.map((name) => removeOurs(root, `.gemini/commands/projectmind/${name}.toml`)),
     ...SKILLS.map((name) => removeOurs(root, `.agents/skills/projectmind-${name}/SKILL.md`)),
     agentsRemoval(root),
+    removeOurs(root, PRE_COMMIT),
   ];
   return changes.filter((c) => c.before !== null);
 }
@@ -211,6 +241,7 @@ export function apply(root, changes, { pruneFolders = false } = {}) {
     else if (actionOf(c) !== 'unchanged') {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, c.after);
+      if (c.mode) fs.chmodSync(file, c.mode);
     }
   }
   if (!pruneFolders) return;

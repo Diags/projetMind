@@ -147,6 +147,41 @@ content back, and its layout too, unless it had several values on one line.
 **Speed.** Through `npx`, a guard call takes about 2.7 s on Windows (measured), against about
 0.3 s when Node runs the script directly, as the Claude Code plugin does.
 
+## Safety net: the pre-commit hook and CI
+
+The tools' hooks don't see writes made through a shell command, nor yours. In a git repository,
+`init` also installs a pre-commit hook, `.git/hooks/pre-commit`, which runs `projectmind
+check-staged`: it refuses a commit that changes a file an active ADR protects, with the ADR and its
+reason, until you run `projectmind allow <file>`. New and changed ADR files are committed freely:
+the release check lists them for review. The hook stays in the clone, so each teammate runs `init`
+for it; `git commit --no-verify` skips it. `init` never replaces an existing pre-commit hook or
+another hook manager (`core.hooksPath`, as husky sets): it prints the line to add instead.
+
+A hook can be skipped; the guarantee is the review. Run the release check on each pull request,
+and make code owners review the decisions and the files they protect. An example, not tested in CI:
+
+```yaml
+# .github/workflows/projectmind.yml
+on: pull_request
+jobs:
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npx --yes projectmind@2.0.0 release-check --base origin/${{ github.base_ref }}
+```
+
+```text
+# .github/CODEOWNERS, with "Require review from Code Owners" turned on for the branch
+docs/decisions/ @your-team
+src/payment/    @your-team
+```
+
 ## The guard in each tool
 
 Each tool's pre-edit hook runs `projectmind guard <tool>`, which reads the tool's hook input and
@@ -211,7 +246,7 @@ already protects.
 - **Permission mode.** According to the Claude Code docs, the confirmation request becomes a refusal
   in auto mode, and an approval in `bypassPermissions` mode.
 - **Shell.** A write made through a command (`sed -i`, `>`, `rm`) is not watched, in any tool:
-  only the tools' file-editing tools are.
+  only the tools' file-editing tools are. The pre-commit hook catches it at commit time.
 - **Consent.** The guard cannot tell whether you really agreed: `projectmind allow` is a visible
   step that the agent runs, and many tools ask you before running a shell command.
 - **Release check.** The verdict does not know about failures specific to one machine: Claude

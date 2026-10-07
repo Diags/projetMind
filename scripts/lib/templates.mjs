@@ -97,6 +97,13 @@ Follow the instructions of .agents/skills/projectmind-${name}/SKILL.md, with: {{
 """
 `;
 
+// The git pre-commit hook: local to the clone, so each teammate runs init for it.
+export const preCommitHook = (cli) => `#!/bin/sh
+# Added by projectmind init: refuses a commit that changes a file protected by an ADR.
+# projectmind uninstall removes it.
+exec ${cli} check-staged
+`;
+
 export const agentsBlock = (cli) => `${BLOCK_START}
 ## Project decisions (ProjectMind)
 

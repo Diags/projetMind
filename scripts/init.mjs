@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import { AdrError } from './lib/adr.mjs';
 import { handleError, isMain } from './lib/cli.mjs';
-import { TOOLS, actionOf, apply, detectTools, planInit, planUninstall } from './lib/init.mjs';
+import { AI_TOOLS, TOOLS, actionOf, apply, detectTools, isGitRoot, planInit, planUninstall } from './lib/init.mjs';
 
 const NEXT_STEPS = {
   'claude-code': 'Claude Code: trust the folder when you open it; the projectmind plugin is then offered from its catalog.',
@@ -15,6 +15,7 @@ const NEXT_STEPS = {
   cursor: 'Cursor: hooks run in trusted workspaces only.',
   copilot: 'Copilot: the CLI and the cloud agent read .github/hooks/ from the repository.',
   gemini: 'Gemini CLI: the new project hook shows a warning the first time it runs.',
+  git: 'git: the pre-commit hook stays in this clone; each teammate runs init for it.',
 };
 
 function readOptions(args, name) {
@@ -34,7 +35,8 @@ function readOptions(args, name) {
 
 function chooseTools(root, wanted) {
   if (wanted === null) return detectTools(root);
-  const tools = wanted === 'all' ? TOOLS : wanted.split(',').map((t) => t.trim()).filter(Boolean);
+  if (wanted === 'all') return [...AI_TOOLS, ...(isGitRoot(root) ? ['git'] : [])];
+  const tools = wanted.split(',').map((t) => t.trim()).filter(Boolean);
   const unknown = tools.filter((t) => !TOOLS.includes(t));
   if (unknown.length) throw new AdrError([`unknown tool: ${unknown.join(', ')} (known: ${TOOLS.join(', ')}, or all)`]);
   return tools;
@@ -59,8 +61,10 @@ export function run(args, prefix = 'node init.mjs') {
         return 1;
       }
       console.log(`${options.dryRun ? 'Dry run, nothing is written. ' : ''}Tools: ${tools.join(', ')}`);
-      const changes = planInit(options.root, tools, { source: options.source });
+      const notes = [];
+      const changes = planInit(options.root, tools, { source: options.source, notes });
       const count = show(changes, options.dryRun);
+      for (const note of notes) console.log(`left to you: ${note}`);
       if (options.dryRun) return 0;
       apply(options.root, changes);
       if (count) {

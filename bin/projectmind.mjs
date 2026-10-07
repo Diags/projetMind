@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import { run as adr } from '../scripts/adr.mjs';
 import { run as allow } from '../scripts/allow.mjs';
+import { run as checkStaged } from '../scripts/check-staged.mjs';
 import { run as guard } from '../scripts/guard.mjs';
 import { run as setup } from '../scripts/init.mjs';
 import { run as releaseCheck } from '../scripts/release-check.mjs';
@@ -16,6 +17,7 @@ const COMMANDS = {
   'release-check': releaseCheck,
   guard: (args) => guard(args, { name: 'projectmind guard' }),
   allow: (args) => allow(args, 'projectmind allow'),
+  'check-staged': checkStaged,
   init: (args) => setup(['init', ...args], 'projectmind'),
   uninstall: (args) => setup(['uninstall', ...args], 'projectmind'),
 };
@@ -36,6 +38,7 @@ Commands:
                                            pre-edit hook: the tool's hook input on stdin
   allow [--root <dir>] [--minutes <n>] <file>…
                                            after the user said yes: lets a blocked edit through
+  check-staged [--root <dir>]              git pre-commit hook: refuses protected files
 
 Options:
   --help       show this help

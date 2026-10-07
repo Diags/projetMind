@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseFrontMatter } from '../scripts/lib/adr.mjs';
-import { actionOf, apply, cliCommand, detectTools, planInit, planUninstall, TOOLS } from '../scripts/lib/init.mjs';
+import { actionOf, AI_TOOLS, apply, cliCommand, detectTools, planInit, planUninstall, TOOLS } from '../scripts/lib/init.mjs';
 
 const BIN = fileURLToPath(new URL('../bin/projectmind.mjs', import.meta.url));
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -51,7 +51,9 @@ test('detectTools: from the files each tool keeps in the repository', () => {
   assert.deepEqual(detectTools(project({ '.github/workflows/ci.yml': '' })), [], 'a .github folder alone is not Copilot');
   assert.deepEqual(detectTools(project({
     'CLAUDE.md': '', '.codex/config.toml': '', '.cursorrules': '', '.github/copilot-instructions.md': '', 'GEMINI.md': '',
-  })), TOOLS);
+  })), AI_TOOLS);
+  assert.deepEqual(detectTools(project({ '.git/HEAD': 'ref: refs/heads/main\n' })), ['git']);
+  assert.deepEqual(detectTools(project({ '.git': 'gitdir: ../elsewhere\n' })), [], 'a worktree has no .git folder of its own');
 });
 
 test('init then uninstall leaves a project exactly as it was', () => {
