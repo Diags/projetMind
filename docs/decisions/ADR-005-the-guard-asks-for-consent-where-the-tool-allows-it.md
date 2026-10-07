@@ -6,6 +6,8 @@ date: 2026-10-05
 protected_files:
   - "hooks/guard.mjs"
   - "scripts/lib/guard.mjs"
+  - "scripts/lib/adapters"
+  - "scripts/lib/consent.mjs"
 reason: "Only Claude Code, Copilot CLI and VS Code enforce a consent request before a write; Codex and Cursor ignore it, and the edit would then go through silently."
 rejected_alternatives:
   - "Return a consent request everywhere: under Codex and Cursor, the edit goes through without a word."
