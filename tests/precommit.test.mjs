@@ -11,8 +11,11 @@ import { actionOf, apply, planInit, planUninstall } from '../scripts/lib/init.mj
 import { checkStaged, stagedFiles } from '../scripts/lib/precommit.mjs';
 
 const BIN = fileURLToPath(new URL('../bin/projectmind.mjs', import.meta.url));
-// The hook runs this repository's command line, not the published package.
-const CLI = `node "${BIN.replace(/\\/g, '/')}"`;
+// The hook runs this repository's command line, not the published package, with the very Node that
+// runs the tests: a "node" found on the PATH may be another one (npx node@20 puts a shim there
+// that git's sh cannot run on Windows).
+const slash = (p) => p.replace(/\\/g, '/');
+const CLI = `"${slash(process.execPath)}" "${slash(BIN)}"`;
 const roots = [];
 after(() => roots.forEach((root) => {
   fs.rmSync(root, { recursive: true, force: true });
