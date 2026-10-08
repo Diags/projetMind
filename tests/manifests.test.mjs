@@ -23,7 +23,10 @@ test('version: set in plugin.json only', () => {
 
 test('package.json: the same plugin, version and license, a published bin, no dependency', () => {
   const pkg = read('package.json');
-  assert.equal(pkg.name, plugin.name);
+  // npm refused the plain name as too close to "project-mind": the package is scoped, the command is not.
+  assert.equal(pkg.name, `@diags/${plugin.name}`);
+  assert.equal(pkg.publishConfig?.access, 'public', 'a scoped package is private unless published as public');
+  assert.deepEqual(Object.keys(pkg.bin), [plugin.name]);
   assert.equal(pkg.version, plugin.version, 'bump both versions together (ADR-006)');
   assert.equal(pkg.license, plugin.license);
   const bin = pkg.bin.projectmind;

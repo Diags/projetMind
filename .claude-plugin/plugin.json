@@ -1,6 +1,6 @@
 {
   "name": "projectmind",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Keeps the memory of a project's decisions and warns before one of them is broken.",
   "author": {
     "name": "Diaguily SYLLA",

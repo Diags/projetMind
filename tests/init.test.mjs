@@ -68,7 +68,7 @@ test('init then uninstall leaves a project exactly as it was', () => {
 test('init writes, for each tool, a hook that runs the guard of that tool, pinned to this version', () => {
   const root = project();
   init(root);
-  const cli = `npx --yes projectmind@${VERSION}`;
+  const cli = `npx --yes @diags/projectmind@${VERSION}`;
   assert.deepEqual(json(root, '.claude/settings.json'), {
     extraKnownMarketplaces: { projectmind: { source: { source: 'github', repo: 'Diags/projetMind' } } },
     enabledPlugins: { 'projectmind@projectmind': true },
@@ -100,7 +100,7 @@ test('the skills follow the Agent Skills standard and call the pinned command', 
     assert.deepEqual(Object.keys(data), ['name', 'description', 'metadata'], 'portable fields only');
     assert.equal(data.name, `projectmind-${name}`, 'the name is the folder name');
     assert.ok(data.description.length <= 1024);
-    assert.match(text, new RegExp(`npx --yes projectmind@${VERSION.replace(/\./g, '\\.')} `));
+    assert.match(text, new RegExp(`npx --yes @diags/projectmind@${VERSION.replace(/\./g, '\\.')} `));
   }
   assert.match(read(root, '.agents/skills/projectmind-remember/SKILL.md'), /adr create --dry-run --input/);
 });

@@ -3,9 +3,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { NPX } from '../cli.mjs';
 import { DEFAULT_MINUTES } from '../consent.mjs';
-
-const VERSION = JSON.parse(fs.readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).version;
 
 // Argument names that hold a file path, across the tools' editing tools.
 const PATH_KEYS = ['file_path', 'path', 'filePath', 'filename', 'target_file', 'targetFile', 'notebook_path'];
@@ -62,7 +61,7 @@ export function consentInstruction(tool, files) {
   return [
     `${tool} cannot ask the user before this edit, so ProjectMind blocked it.`,
     'Ask the user in the chat whether to go ahead. Only if they agree, run',
-    `\`npx --yes projectmind@${VERSION} allow ${files.map(quote).join(' ')}\` and retry the edit;`,
+    `\`${NPX} allow ${files.map(quote).join(' ')}\` and retry the edit;`,
     `the permission lasts ${DEFAULT_MINUTES} minutes.`,
   ].join(' ');
 }

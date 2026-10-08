@@ -8,9 +8,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { AdrError } from './adr.mjs';
+import { NPX } from './cli.mjs';
 import { BLOCK_END, BLOCK_START, SKILLS, agentsBlock, geminiCommand, preCommitHook, skillFile } from './templates.mjs';
 
-const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 export const AI_TOOLS = ['claude-code', 'codex', 'cursor', 'copilot', 'gemini'];
 // "git" is the pre-commit safety net, for every tool and for humans.
 export const TOOLS = [...AI_TOOLS, 'git'];
@@ -46,7 +46,7 @@ export function isGitRoot(root) {
 const quote = (s) => (/[\s"'$`\\]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s);
 // The command the generated files run: the published package pinned to this version, or another
 // npm package spec (a tarball, a git URL…) given with --source.
-export const cliCommand = (source) => (source ? `npx --yes --package ${quote(source)} projectmind` : `npx --yes projectmind@${VERSION}`);
+export const cliCommand = (source) => (source ? `npx --yes --package ${quote(source)} projectmind` : NPX);
 
 const isOurs = (value) => /projectmind/.test(JSON.stringify(value));
 

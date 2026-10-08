@@ -101,25 +101,27 @@ the first of these files that announces one, and the report says which file it c
 
 ## Command line, for any AI tool
 
-The npm package `projectmind` runs the same commands without Claude Code: from Codex, Cursor,
+The npm package `@diags/projectmind` runs the same commands without Claude Code: from Codex, Cursor,
 Copilot, Gemini CLI or any other tool that can run a shell command, or by hand. It has no dependency.
+npm refused the plain name `projectmind` as too close to `project-mind`, hence the scope; the
+command it installs is still `projectmind`.
 
 ```bash
-npx projectmind@2.0.0 why src/payment.ts
-npx projectmind@2.0.0 release-check --no-check
-npx projectmind@2.0.0 adr list
-echo '{"title": "…", "reason": "…", "context": "…", "decision": "…"}' | npx projectmind@2.0.0 adr create --dry-run
+npx @diags/projectmind@2.0.1 why src/payment.ts
+npx @diags/projectmind@2.0.1 release-check --no-check
+npx @diags/projectmind@2.0.1 adr list
+echo '{"title": "…", "reason": "…", "context": "…", "decision": "…"}' | npx @diags/projectmind@2.0.1 adr create --dry-run
 ```
 
-`npx projectmind --help` lists every option.
+`npx @diags/projectmind --help` lists every option.
 
 ## Set up the other AI tools: `init`
 
 In the project, run once:
 
 ```bash
-npx projectmind@2.0.0 init                         # the tools found in the project
-npx projectmind@2.0.0 init --tools all --dry-run   # what it would write, for every tool
+npx @diags/projectmind@2.0.1 init                         # the tools found in the project
+npx @diags/projectmind@2.0.1 init --tools all --dry-run   # what it would write, for every tool
 ```
 
 `init` finds the tools from their files (`.claude/` or `CLAUDE.md`, `.codex/`, `.cursor/` or
@@ -135,12 +137,12 @@ or takes them from `--tools`. For each tool it writes:
 | Gemini CLI | `.gemini/settings.json`, `.gemini/commands/projectmind/*.toml`, the skills |
 
 The skills, in `.agents/skills/projectmind-*/SKILL.md`, follow the [Agent Skills](https://agentskills.io)
-standard. Every hook and skill runs `npx --yes projectmind@<version>`, pinned to the version that
+standard. Every hook and skill runs `npx --yes @diags/projectmind@<version>`, pinned to the version that
 wrote it; `--source <npm spec>` uses another package, such as a tarball. Existing files are
 completed, never replaced, and running `init` again changes nothing. Commit the files so that the
 whole team gets them.
 
-`npx projectmind@2.0.0 uninstall` removes what `init` wrote: its files, its entries in the files
+`npx @diags/projectmind@2.0.1 uninstall` removes what `init` wrote: its files, its entries in the files
 it completed, its block in `AGENTS.md`, and the folders left empty. A completed file gets its
 content back, and its layout too, unless it had several values on one line.
 
@@ -173,7 +175,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npx --yes projectmind@2.0.0 release-check --base origin/${{ github.base_ref }}
+      - run: npx --yes @diags/projectmind@2.0.1 release-check --base origin/${{ github.base_ref }}
 ```
 
 ```text
@@ -199,7 +201,7 @@ the strongest thing each one allows:
 | VS Code agent | `.github/hooks/*.json` | asks for confirmation, best effort | not tested: its tool names are not documented in what we read |
 
 When a tool refuses, the reason tells the agent to ask you in the chat and, only if you agree, to
-run `npx --yes projectmind@<version> allow <file>`: the edit then goes through for 10 minutes
+run `npx --yes @diags/projectmind@<version> allow <file>`: the edit then goes through for 10 minutes
 (`--minutes` changes that). An internal error of the guard never blocks the edit: it exits the way
 that lets each tool proceed (exit code 0 for Copilot, which blocks on any other code).
 

@@ -4,6 +4,12 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { AdrError } from './adr.mjs';
 
+// The npm package, as package.json names it. npm refused the plain name "projectmind" as too
+// close to "project-mind", so the package is scoped; its command is still "projectmind".
+export const PACKAGE = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+// How generated files run ProjectMind: the published package, pinned to this version.
+export const NPX = `npx --yes ${PACKAGE.name}@${PACKAGE.version}`;
+
 // True when this module is the script node was started with, rather than a module that
 // bin/projectmind.mjs imported.
 export function isMain(url) {

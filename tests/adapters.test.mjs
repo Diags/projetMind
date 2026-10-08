@@ -87,7 +87,7 @@ test('Codex: a patch on a protected file is denied, with the way to get consent'
   assert.equal(out.hookEventName, 'PreToolUse');
   assert.equal(out.permissionDecision, 'deny');
   assert.match(out.permissionDecisionReason, /ADR-001 — Frozen runtime/);
-  assert.match(out.permissionDecisionReason, /`npx --yes projectmind@\d+\.\d+\.\d+ allow src\/a\.js`/);
+  assert.match(out.permissionDecisionReason, /`npx --yes @diags\/projectmind@\d+\.\d+\.\d+ allow src\/a\.js`/);
   const fromSubfolder = codex.answer(call(patch('*** Update File: a.js'), path.join(root, 'src')), { now: 0 });
   assert.equal(JSON.parse(fromSubfolder.stdout).hookSpecificOutput.permissionDecision, 'deny', 'paths are relative to cwd');
   assert.deepEqual(codex.answer(call(patch('*** Add File: src/free.js', '+x')), { now: 0 }), PASS);
