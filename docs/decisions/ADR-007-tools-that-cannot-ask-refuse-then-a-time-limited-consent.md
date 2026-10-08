@@ -18,7 +18,7 @@ Under Codex, Cursor and Gemini CLI, the guard refuses an edit of a protected fil
 
 ## Decision Outcome
 
-The refusal tells the agent to ask the user in the chat and, only if they agree, to run `npx --yes projectmind@<version> allow <file>`. The edit of that file then goes through for 10 minutes; --minutes changes the duration. The permission is kept in the system's temporary folder, one file per project, never in the repository. The pre-commit hook honours the same permission.
+The refusal tells the agent to ask the user in the chat and, only if they agree, to run `npx --yes @diags/projectmind@<version> allow <file>`. The edit of that file then goes through for 10 minutes; --minutes changes the duration. The permission is kept in the system's temporary folder, one file per project, never in the repository. The pre-commit hook honours the same permission.
 
 ### Consequences
 
